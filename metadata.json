@@ -1,0 +1,5 @@
+{
+  "name": "Mhiexter Mhiee 🫰",
+  "description": "A simple video player application with a built-in unified AI browser.",
+  "requestFramePermissions": ["display-capture", "camera", "microphone"]
+}

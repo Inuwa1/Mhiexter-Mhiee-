@@ -13,6 +13,7 @@ import PhotoStudio from './components/PhotoStudio';
 export default function App() {
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [videoName, setVideoName] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [volume, setVolume] = useState(1);
   const [isHovering, setIsHovering] = useState(false);
@@ -59,8 +60,10 @@ export default function App() {
       setVideoName(file.name);
       setIsPlaying(false);
       setCurrentTime(0);
+      setErrorMessage(null);
     } else {
-      alert('Please select a valid video file.');
+      setErrorMessage('Please select a valid video file.');
+      setTimeout(() => setErrorMessage(null), 3000);
     }
   };
 
@@ -260,6 +263,18 @@ export default function App() {
           <h2 className="text-3xl font-bold text-white tracking-tight">Drop video here</h2>
           <p className="text-indigo-200 mt-2 font-medium">Release to play instantly</p>
         </div>
+      )}
+
+      {/* Error Message */}
+      {errorMessage && (
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          className="fixed top-4 z-50 bg-red-500/90 text-white px-6 py-3 rounded-xl shadow-xl font-medium backdrop-blur-sm"
+        >
+          {errorMessage}
+        </motion.div>
       )}
 
       <header className="mb-8 w-full max-w-6xl flex flex-col md:flex-row justify-between items-center gap-6">

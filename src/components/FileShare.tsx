@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Share2, Download, Upload, CheckCircle, XCircle, Loader2, Copy } from 'lucide-react';
+import { Share2, Download, Upload, CheckCircle, XCircle, Loader2, Copy, Camera } from 'lucide-react';
+import { AnimatePresence } from 'motion/react';
 
 const CHUNK_SIZE = 16384; // 16KB chunks for WebRTC DataChannel
 
@@ -21,7 +22,70 @@ export default function FileShare() {
   // File transfer state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [transferProgress, setTransferProgress] = useState(0);
+  const [estimatedTime, setEstimatedTime] = useState<string | null>(null);
+  const startTimeRef = useRef<number | null>(null);
   const [isTransferring, setIsTransferring] = useState(false);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+      setIsCameraActive(false);
+    }
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: { exact: "environment" } } 
+      });
+      setCameraStream(stream);
+      setIsCameraActive(true);
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error("Camera error:", err);
+      // Fallback to any camera
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        setCameraStream(stream);
+        setIsCameraActive(true);
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream;
+        }
+      } catch (err2) {
+        alert("Could not access camera.");
+      }
+    }
+  };
+
+  const captureCamera = () => {
+    if (cameraVideoRef.current && canvasRef.current) {
+      const video = cameraVideoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d')?.drawImage(video, 0, 0);
+      const dataUrl = canvas.toDataURL('image/png');
+      
+      // Convert dataUrl to File
+      fetch(dataUrl)
+        .then(res => res.blob())
+        .then(blob => {
+          const file = new File([blob], "camera-photo.png", { type: "image/png" });
+          setSelectedFile(file);
+          setTransferComplete(false);
+          setTransferProgress(0);
+        });
+      
+      stopCamera();
+    }
+  };
   const [incomingFileMeta, setIncomingFileMetaState] = useState<{ name: string; size: number; type: string } | null>(null);
   const incomingFileMetaRef = useRef<{ name: string; size: number; type: string } | null>(null);
 
@@ -152,6 +216,8 @@ export default function FileShare() {
           setTransferProgress(0);
           setTransferComplete(false);
           setStatus(`Receiving file: ${msg.name}...`);
+          startTimeRef.current = Date.now();
+          setEstimatedTime(null);
         } else if (msg.type === 'eof') {
           // File transfer complete
           const meta = incomingFileMetaRef.current;
@@ -181,6 +247,18 @@ export default function FileShare() {
         if (meta) {
           const progress = (receivedSizeRef.current / meta.size) * 100;
           setTransferProgress(progress);
+          
+          // Calculate time remaining
+          if (startTimeRef.current && receivedSizeRef.current > 0) {
+            const elapsed = (Date.now() - startTimeRef.current) / 1000;
+            const bytesPerSecond = receivedSizeRef.current / elapsed;
+            const remainingBytes = meta.size - receivedSizeRef.current;
+            const secondsRemaining = remainingBytes / bytesPerSecond;
+            
+            const minutes = Math.floor(secondsRemaining / 60);
+            const seconds = Math.floor(secondsRemaining % 60);
+            setEstimatedTime(`${minutes}m ${seconds}s remaining`);
+          }
         }
       }
     };
@@ -290,6 +368,8 @@ export default function FileShare() {
     const dc = dataChannelRef.current;
     setIsTransferring(true);
     setTransferProgress(0);
+    setEstimatedTime(null);
+    startTimeRef.current = Date.now();
     setStatus(`Sending file: ${selectedFile.name}...`);
 
     // Send metadata
@@ -314,7 +394,20 @@ export default function FileShare() {
       try {
         dc.send(e.target.result as ArrayBuffer);
         offset += (e.target.result as ArrayBuffer).byteLength;
-        setTransferProgress((offset / selectedFile.size) * 100);
+        const progress = (offset / selectedFile.size) * 100;
+        setTransferProgress(progress);
+        
+        // Calculate time remaining
+        if (startTimeRef.current && offset > 0) {
+          const elapsed = (Date.now() - startTimeRef.current) / 1000;
+          const bytesPerSecond = offset / elapsed;
+          const remainingBytes = selectedFile.size - offset;
+          const secondsRemaining = remainingBytes / bytesPerSecond;
+          
+          const minutes = Math.floor(secondsRemaining / 60);
+          const seconds = Math.floor(secondsRemaining % 60);
+          setEstimatedTime(`${minutes}m ${seconds}s remaining`);
+        }
 
         if (offset < selectedFile.size) {
           // Check buffer to avoid overflowing
@@ -455,6 +548,15 @@ export default function FileShare() {
               </span>
             </label>
             
+            <button
+              onClick={startCamera}
+              className="mt-2 text-indigo-400 hover:text-indigo-300 text-sm flex items-center gap-1"
+              disabled={isTransferring}
+            >
+              <Camera className="w-4 h-4" />
+              Use Camera
+            </button>
+            
             {selectedFile && !isTransferring && !transferComplete && (
               <button 
                 onClick={sendFile}
@@ -465,13 +567,32 @@ export default function FileShare() {
             )}
           </div>
 
+          {/* Camera Preview Modal */}
+          <AnimatePresence>
+            {isCameraActive && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4">
+                <div className="relative w-full max-w-lg bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl">
+                  <video ref={cameraVideoRef} autoPlay playsInline className="w-full aspect-video bg-black" />
+                  <canvas ref={canvasRef} className="hidden" />
+                  <div className="p-4 flex justify-center gap-4">
+                    <button onClick={stopCamera} className="px-4 py-2 bg-zinc-800 text-white rounded-lg">Cancel</button>
+                    <button onClick={captureCamera} className="px-4 py-2 bg-indigo-600 text-white rounded-lg">Capture</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </AnimatePresence>
+
           {(isTransferring || transferComplete) && (
             <div className="bg-zinc-950 rounded-xl p-4 border border-zinc-800">
               <div className="flex justify-between text-sm mb-2">
                 <span className="text-zinc-300 truncate pr-4">
                   {incomingFileMeta ? incomingFileMeta.name : selectedFile?.name}
                 </span>
-                <span className="text-indigo-400 font-mono">{Math.round(transferProgress)}%</span>
+                <div className="flex flex-col items-end">
+                  <span className="text-indigo-400 font-mono">{Math.round(transferProgress)}%</span>
+                  {estimatedTime && <span className="text-xs text-zinc-500">{estimatedTime}</span>}
+                </div>
               </div>
               <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden">
                 <div 

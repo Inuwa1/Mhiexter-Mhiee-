@@ -1,11 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import MhiexterBrowser from './MhiexterBrowser';
-import { Search, Shield, X, Globe, Sparkles, Send, Cast, MonitorOff, ImagePlus, XCircle, Download, Share2, Maximize2, SlidersHorizontal, Check, RotateCcw, Wand2, Copy } from 'lucide-react';
+import VoiceChat from './VoiceChat';
+import MapPanel from './MapPanel';
+import BookGenerator from './BookGenerator';
+import GraphRenderer from './GraphRenderer';
+import { Search, Shield, X, Globe, Sparkles, Send, Cast, MonitorOff, ImagePlus, XCircle, Download, Share2, Maximize2, SlidersHorizontal, Check, RotateCcw, Wand2, Copy, Mic, Map, Camera, BookOpen } from 'lucide-react';
 import ReactCrop, { type Crop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, Type, FunctionCallingConfigMode } from '@google/genai';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 
 // Initialize Gemini API
 // const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -16,20 +24,66 @@ interface Message {
   images?: string[];
   generatedImage?: string;
   suggestions?: string[];
+  groundingMetadata?: any;
+}
+
+interface ChatSession {
+  id: string;
+  title: string;
+  messages: Message[];
 }
 
 export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
+  const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [isCasting, setIsCasting] = useState(false);
-  const [activeFolder, setActiveFolder] = useState<'video' | 'browser' | 'settings' | null>(null);
+  const [activeFolder, setActiveFolder] = useState<'video' | 'browser' | 'settings' | 'history' | 'map' | 'book' | null>(null);
   const [castError, setCastError] = useState('');
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [defaultFace, setDefaultFace] = useState<string | null>(localStorage.getItem('defaultFace'));
   const [searchEngine, setSearchEngine] = useState<'Deepseek' | 'Chat GPT' | 'Gemini'>('Gemini');
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translatedContent, setTranslatedContent] = useState<string | null>(null);
+
+  const handleTranslate = async (url: string) => {
+    setIsTranslating(true);
+    setTranslatedContent(null);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const language = localStorage.getItem('preferredLanguage') || 'English';
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `Translate the content of the following URL to ${language}: ${url}`,
+        config: {
+          tools: [{ urlContext: {} }]
+        }
+      });
+      setTranslatedContent(response.text || "Translation failed.");
+    } catch (error) {
+      console.error(error);
+      setTranslatedContent("Failed to translate page.");
+    } finally {
+      setIsTranslating(false);
+    }
+  };
   const [enableSummarization, setEnableSummarization] = useState(true);
   const [enableProblemSolving, setEnableProblemSolving] = useState(true);
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
+
+  const extractGraphData = (text: string) => {
+    const match = text.match(/```json\s*(\{[\s\S]*?"type":\s*"graph"[\s\S]*?\})\s*```/);
+    if (match) {
+      try {
+        return JSON.parse(match[1]);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  };
   const [isEditingImage, setIsEditingImage] = useState(false);
   const [isObjectEditing, setIsObjectEditing] = useState(false);
   const [objectEditPrompt, setObjectEditPrompt] = useState('');
@@ -41,12 +95,15 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
   const [videoPrompt, setVideoPrompt] = useState('');
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
-  
-  const chatRef = useRef<any>(null);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  const chatRef = useRef<any>(null);
 
   const handleVideoGeneration = async () => {
     if (!videoPrompt || isGeneratingVideo) return;
@@ -103,6 +160,53 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
       }
     } finally {
       setIsGeneratingVideo(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+      setIsCameraActive(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isCameraActive && cameraVideoRef.current && cameraStream) {
+      cameraVideoRef.current.srcObject = cameraStream;
+    }
+  }, [isCameraActive, cameraStream]);
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: { exact: "environment" } } 
+      });
+      setCameraStream(stream);
+      setIsCameraActive(true);
+    } catch (err) {
+      console.error("Camera error:", err);
+      // Fallback to any camera
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        setCameraStream(stream);
+        setIsCameraActive(true);
+      } catch (err2) {
+        alert("Could not access camera.");
+      }
+    }
+  };
+
+  const captureCamera = () => {
+    if (cameraVideoRef.current && canvasRef.current) {
+      const video = cameraVideoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d')?.drawImage(video, 0, 0);
+      const dataUrl = canvas.toDataURL('image/png');
+      setSelectedImages(prev => [...prev, dataUrl]);
+      stopCamera();
     }
   };
 
@@ -200,7 +304,7 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
   const handleObjectEditSubmit = () => {
     if (!expandedImage || !objectEditPrompt.trim()) return;
     
-    let finalPrompt = `Please edit this image: ${objectEditPrompt}.`;
+    let finalPrompt = `Please edit this image: ${objectEditPrompt}. IMPORTANT: Do not decompose, alter, or touch the face of the person in the image. Ensure the editing looks completely natural and not like AI editing.`;
     if (completedCrop && completedCrop.width > 0) {
       finalPrompt += ` The object to modify is located roughly in the ${getRegionName(completedCrop)} of the image.`;
     }
@@ -240,9 +344,14 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
   const sendMessage = async (text: string, imagesToUse: string[] = []) => {
     if ((!text.trim() && imagesToUse.length === 0) || isTyping) return;
 
+    let finalImages = [...imagesToUse];
+    if ((text.toLowerCase().includes('me') || text.toLowerCase().includes('myself')) && defaultFace) {
+      finalImages.unshift(defaultFace);
+    }
+
     setInput('');
     setSelectedImages([]);
-    setMessages(prev => [...prev, { role: 'user', text, images: imagesToUse.length > 0 ? imagesToUse : undefined }]);
+    setMessages(prev => [...prev, { role: 'user', text, images: finalImages.length > 0 ? finalImages : undefined }]);
     setIsTyping(true);
 
     try {
@@ -251,30 +360,55 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
       if (!chatRef.current) {
         const processImageTool = {
           name: "process_image",
-          description: "Generate a new image, edit an existing image, perform face replacement, or edit/replace a specific described object in the image. Call this tool when the user asks to create, generate, draw, edit, modify an image, swap/replace faces, or change a specific object.",
+          description: "Generate a new image, edit an existing image, perform face replacement, edit/replace a specific described object in the image, or identify objects within an image. Call this tool when the user asks to create, generate, draw, edit, modify an image, swap/replace faces, change a specific object, or identify objects in an image.",
           parameters: {
             type: Type.OBJECT,
             properties: {
-              prompt: { type: Type.STRING, description: "The detailed prompt for image generation or editing. For object editing, clearly describe the object to be edited and the desired change (e.g., 'change the red car to a blue truck'). For face replacement, specify which face goes where seamlessly." },
-              action: { type: Type.STRING, description: "'generate', 'edit', 'face_replace', or 'edit_object'" }
+              prompt: { type: Type.STRING, description: "The detailed prompt for image generation, editing, or identification. For object editing, clearly describe the object to be edited and the desired change (e.g., 'change the red car to a blue truck'). For face replacement, specify which face goes where seamlessly. For identification, describe what to identify if needed." },
+              action: { type: Type.STRING, description: "'generate', 'edit', 'face_replace', 'edit_object', or 'identify_objects'" }
             },
             required: ["prompt", "action"]
+          }
+        };
+        const manageTasksTool = {
+          name: "manage_tasks",
+          description: "Manage items in the chat list or set a timer. Call this tool when the user asks to add an item to a list, remove an item from a list, or set a timer.",
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              action: { type: Type.STRING, description: "'add_item', 'remove_item', or 'set_timer'" },
+              item: { type: Type.STRING, description: "The item to add or remove." },
+              seconds: { type: Type.NUMBER, description: "The timer duration in seconds." }
+            },
+            required: ["action"]
           }
         };
 
         chatRef.current = ai.chats.create({
           model: 'gemini-3-flash-preview',
           config: {
-            systemInstruction: "You are Mhiee, the ultimate unified AI assistant. You combine the strengths of the world's best AIs to solve complex, tricky problems in seconds. You are fluent in every language in the world, including Hausa. Provide comprehensive, accurate, and brilliant solutions. You are embedded directly in the app.\n\nIMPORTANT: At the very end of your response, always provide 3 short, actionable follow-up questions or prompts the user can ask next. Format them exactly like this:\n\nSUGGESTIONS:\n- [Suggestion 1]\n- [Suggestion 2]\n- [Suggestion 3]",
-            tools: [{ functionDeclarations: [processImageTool] }]
+            systemInstruction: `You are Mhiee, the ultimate unified AI assistant. The current date and time is ${new Date().toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' })}. You combine the strengths of the world's best AIs to solve complex, tricky problems in seconds. You are fluent in every language in the world, including Hausa. Provide comprehensive, accurate, and brilliant solutions. You are capable of handling all branches of mathematics, from basic arithmetic to advanced theoretical physics and complex analysis. When asked to derive formulas or solve math problems, you MUST provide the complete, rigorous derivation, showing every single logical and algebraic step without skipping any, using LaTeX notation for all mathematical expressions.
+
+When asked to display data, you MUST use Markdown tables. Ensure every data point is correctly positioned in the appropriate row and column.
+
+When asked to draw a graph, you MUST provide the data in a JSON block with the following format: \`\`\`json { "type": "graph", "data": [...], "xAxis": "...", "yAxis": "..." } \`\`\`.
+
+ONLY share information about your creator, Mhiexter Muhammad (Inuwa Shehu) from Ikara local government, Kaduna state, if the user explicitly asks for it.
+
+IMPORTANT: At the very end of your response, always provide 3 short, actionable follow-up questions or prompts the user can ask next. Format them exactly like this:\n\nSUGGESTIONS:\n- [Suggestion 1]\n- [Suggestion 2]\n- [Suggestion 3]`,
+            tools: [{ functionDeclarations: [processImageTool, manageTasksTool] }, { googleMaps: {} }],
+            toolConfig: { 
+              includeServerSideToolInvocations: true,
+              functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO }
+            }
           }
         });
       }
 
       let messagePayload: any = text;
-      if (imagesToUse.length > 0) {
+      if (finalImages.length > 0) {
         messagePayload = [];
-        for (const img of imagesToUse) {
+        for (const img of finalImages) {
           if (!img) continue;
           const match = img.match(/^data:(image\/[a-zA-Z+.-]+);base64,(.+)$/);
           if (match) {
@@ -295,6 +429,17 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
         if (chunk.functionCalls && chunk.functionCalls.length > 0) {
           functionCall = chunk.functionCalls[0];
         }
+        if (chunk.candidates && chunk.candidates[0] && chunk.candidates[0].groundingMetadata) {
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const lastIndex = newMessages.length - 1;
+            newMessages[lastIndex] = {
+              ...newMessages[lastIndex],
+              groundingMetadata: chunk.candidates![0].groundingMetadata
+            };
+            return newMessages;
+          });
+        }
         if (chunk.text) {
           setMessages(prev => {
             const newMessages = [...prev];
@@ -309,74 +454,173 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
         }
       }
 
-      if (functionCall && functionCall.name === 'process_image') {
-        const { prompt, action } = functionCall.args;
-        
-        setMessages(prev => {
-          const newMsgs = [...prev];
-          newMsgs[newMsgs.length - 1].text += "\n\n*Processing image...*";
-          return newMsgs;
-        });
+        if (functionCall && (functionCall.name === 'process_image' || functionCall.name === 'manage_tasks')) {
+          if (functionCall.name === 'process_image') {
+            const { prompt, action } = functionCall.args;
+            
+            setMessages(prev => {
+              const newMsgs = [...prev];
+              newMsgs[newMsgs.length - 1].text += "\n\n*Processing image...*";
+              return newMsgs;
+            });
 
-        try {
-          const imageParts: any[] = [];
-          if (action === 'edit' || action === 'face_replace' || action === 'edit_object') {
-            const lastMessageWithImage = [...messages].reverse().find(m => (m.images && m.images.length > 0) || m.generatedImage);
-            const lastImages = imagesToUse.length > 0 
-              ? imagesToUse 
-              : (lastMessageWithImage 
-                  ? (lastMessageWithImage.generatedImage ? [lastMessageWithImage.generatedImage] : lastMessageWithImage.images!) 
-                  : []);
-            if (lastImages.length > 0) {
-              for (const img of lastImages) {
-                if (!img) continue;
-                const match = img.match(/^data:(image\/[a-zA-Z+.-]+);base64,(.+)$/);
-                if (match) {
-                  imageParts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+            try {
+              const imageParts: any[] = [];
+              if (action === 'edit' || action === 'face_replace' || action === 'edit_object' || action === 'identify_objects') {
+                const lastMessageWithImage = [...messages].reverse().find(m => (m.images && m.images.length > 0) || m.generatedImage);
+                const lastImages = imagesToUse.length > 0 
+                  ? imagesToUse 
+                  : (lastMessageWithImage 
+                      ? (lastMessageWithImage.generatedImage ? [lastMessageWithImage.generatedImage] : lastMessageWithImage.images!) 
+                      : []);
+                if (lastImages.length > 0) {
+                  for (const img of lastImages) {
+                    if (!img) continue;
+                    const match = img.match(/^data:(image\/[a-zA-Z+.-]+);base64,(.+)$/);
+                    if (match) {
+                      imageParts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+                    }
+                  }
+                } else {
+                  throw new Error("No images found to process. Please upload images first.");
                 }
               }
-            } else {
-              throw new Error("No images found to edit. Please upload images first.");
-            }
-          }
-          imageParts.push({ text: prompt });
+              imageParts.push({ text: `${prompt}. IMPORTANT: Do not decompose, alter, or touch the face of the person in the image. Ensure the editing looks completely natural and not like AI editing.` });
 
-          const imgResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: { parts: imageParts }
-          });
+              let generatedImage = null;
+              let textResponse = null;
 
-          let generatedImage = null;
-          let textResponse = null;
-          const candidate = imgResponse.candidates?.[0];
+              if (action === 'identify_objects') {
+                const identificationResponse = await ai.models.generateContent({
+                  model: 'gemini-3-flash-preview',
+                  contents: { parts: imageParts },
+                  config: {
+                    systemInstruction: "Identify all objects in the provided image. Return a JSON array of objects, where each object has 'name' and 'description'.",
+                    responseMimeType: "application/json"
+                  }
+                });
+                textResponse = identificationResponse.text;
+              } else {
+                const imgResponse = await ai.models.generateContent({
+                  model: 'gemini-2.5-flash-image',
+                  contents: { parts: imageParts }
+                });
+                const candidate = imgResponse.candidates?.[0];
 
-          if (candidate?.finishReason === 'SAFETY') {
-            throw new Error("Image generation was blocked due to safety guidelines.");
-          }
+                if (candidate?.finishReason === 'SAFETY') {
+                  throw new Error("Image generation was blocked due to safety guidelines.");
+                }
 
-          if (candidate?.content?.parts) {
-            for (const part of candidate.content.parts) {
-              if (part.inlineData) {
-                generatedImage = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
-                break;
-              } else if (part.text) {
-                textResponse = part.text;
+                if (candidate?.content?.parts) {
+                  for (const part of candidate.content.parts) {
+                    if (part.inlineData) {
+                      generatedImage = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
+                      break;
+                    } else if (part.text) {
+                      textResponse = part.text;
+                    }
+                  }
+                }
               }
-            }
-          }
 
-          if (generatedImage) {
+              if (generatedImage || textResponse) {
+                setMessages(prev => {
+                  const newMsgs = [...prev];
+                  const lastMsg = newMsgs[newMsgs.length - 1];
+                  lastMsg.text = lastMsg.text.replace("\n\n*Processing image...*", "");
+                  if (generatedImage) lastMsg.generatedImage = generatedImage;
+                  if (textResponse) lastMsg.text += `\n\n*Identified Objects:* ${textResponse}`;
+                  return newMsgs;
+                });
+
+                const funcRespObj: any = {
+                  name: functionCall.name,
+                  response: { success: true, message: action === 'identify_objects' ? "Objects identified successfully." : "Image generated successfully." }
+                };
+                if (functionCall.id) funcRespObj.id = functionCall.id;
+
+                const funcStream = await chatRef.current.sendMessageStream({
+                  message: [{ functionResponse: funcRespObj }]
+                });
+
+                for await (const chunk of funcStream) {
+                  if (chunk.text) {
+                    setMessages(prev => {
+                      const newMsgs = [...prev];
+                      const lastIndex = newMsgs.length - 1;
+                      newMsgs[lastIndex] = {
+                        ...newMsgs[lastIndex],
+                        text: newMsgs[lastIndex].text + chunk.text
+                      };
+                      return newMsgs;
+                    });
+                  }
+                }
+              } else {
+                throw new Error(textResponse || "Failed to process image.");
+              }
+            } catch (imgErr: any) {
+              console.error("Image generation error:", imgErr);
+              
+              let friendlyImgError = imgErr.message || "An unknown error occurred.";
+              const lowerErr = friendlyImgError.toLowerCase();
+
+              if (lowerErr.includes('aspect ratio') || lowerErr.includes('dimensions')) {
+                friendlyImgError = "Image generation failed due to unsupported aspect ratio.";
+              } else if (action === 'face_replace') {
+                friendlyImgError = "Face swap failed: Please ensure both faces are clearly visible.";
+              } else if (action === 'edit_object') {
+                friendlyImgError = "Object editing failed: Please ensure the object is clearly described and visible in the image.";
+              } else if (lowerErr.includes('safety') || lowerErr.includes('blocked')) {
+                friendlyImgError = "Image generation was blocked due to safety guidelines.";
+              } else if (lowerErr.includes('quota') || lowerErr.includes('429')) {
+                friendlyImgError = "Image generation failed: Rate limit exceeded. Please try again later.";
+              } else {
+                friendlyImgError = `Image processing failed: ${friendlyImgError}`;
+              }
+
+              setMessages(prev => {
+                const newMsgs = [...prev];
+                const lastMsg = newMsgs[newMsgs.length - 1];
+                lastMsg.text = lastMsg.text.replace("\n\n*Processing image...*", `\n\n*Image Error: ${friendlyImgError}*`);
+                return newMsgs;
+              });
+
+              const errRespObj: any = {
+                name: functionCall.name,
+                response: { success: false, error: friendlyImgError }
+              };
+              if (functionCall.id) errRespObj.id = functionCall.id;
+
+              await chatRef.current.sendMessageStream({
+                message: [{ functionResponse: errRespObj }]
+              });
+            }
+          } else if (functionCall.name === 'manage_tasks') {
+            const { action, item, seconds } = functionCall.args;
+            
+            let resultMessage = "";
+            if (action === 'add_item') {
+              resultMessage = `Added "${item}" to your list.`;
+            } else if (action === 'remove_item') {
+              resultMessage = `Removed "${item}" from your list.`;
+            } else if (action === 'set_timer') {
+              resultMessage = `Timer set for ${seconds} seconds.`;
+              setTimeout(() => {
+                alert(`Timer for ${seconds} seconds is up!`);
+              }, seconds * 1000);
+            }
+
             setMessages(prev => {
               const newMsgs = [...prev];
               const lastMsg = newMsgs[newMsgs.length - 1];
-              lastMsg.text = lastMsg.text.replace("\n\n*Processing image...*", "");
-              lastMsg.generatedImage = generatedImage;
+              lastMsg.text += `\n\n*${resultMessage}*`;
               return newMsgs;
             });
 
             const funcRespObj: any = {
               name: functionCall.name,
-              response: { success: true, message: "Image generated successfully." }
+              response: { success: true, message: resultMessage }
             };
             if (functionCall.id) funcRespObj.id = functionCall.id;
 
@@ -397,47 +641,8 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
                 });
               }
             }
-          } else {
-            throw new Error(textResponse || "Failed to generate image.");
           }
-        } catch (imgErr: any) {
-          console.error("Image generation error:", imgErr);
-          
-          let friendlyImgError = imgErr.message || "An unknown error occurred.";
-          const lowerErr = friendlyImgError.toLowerCase();
-
-          if (lowerErr.includes('aspect ratio') || lowerErr.includes('dimensions')) {
-            friendlyImgError = "Image generation failed due to unsupported aspect ratio.";
-          } else if (action === 'face_replace') {
-            friendlyImgError = "Face swap failed: Please ensure both faces are clearly visible.";
-          } else if (action === 'edit_object') {
-            friendlyImgError = "Object editing failed: Please ensure the object is clearly described and visible in the image.";
-          } else if (lowerErr.includes('safety') || lowerErr.includes('blocked')) {
-            friendlyImgError = "Image generation was blocked due to safety guidelines.";
-          } else if (lowerErr.includes('quota') || lowerErr.includes('429')) {
-            friendlyImgError = "Image generation failed: Rate limit exceeded. Please try again later.";
-          } else {
-            friendlyImgError = `Image processing failed: ${friendlyImgError}`;
-          }
-
-          setMessages(prev => {
-            const newMsgs = [...prev];
-            const lastMsg = newMsgs[newMsgs.length - 1];
-            lastMsg.text = lastMsg.text.replace("\n\n*Processing image...*", `\n\n*Image Error: ${friendlyImgError}*`);
-            return newMsgs;
-          });
-
-          const errRespObj: any = {
-            name: functionCall.name,
-            response: { success: false, error: friendlyImgError }
-          };
-          if (functionCall.id) errRespObj.id = functionCall.id;
-
-          await chatRef.current.sendMessageStream({
-            message: [{ functionResponse: errRespObj }]
-          });
         }
-      }
 
       // Parse suggestions after stream finishes
       setMessages(prev => {
@@ -579,12 +784,41 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
             </span>
           )}
           <button 
-            onClick={() => { setMessages([]); chatRef.current = null; }}
+            onClick={() => setIsPrivate(!isPrivate)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              isPrivate
+                ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30' 
+                : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white'
+            }`}
+            title="Toggle Private Chat"
+          >
+            {isPrivate ? <Shield className="w-4 h-4" /> : <Shield className="w-4 h-4 text-zinc-500" />}
+            <span className="hidden sm:inline">{isPrivate ? 'Private' : 'Public'}</span>
+          </button>
+          <button 
+            onClick={() => {
+              if (!isPrivate && messages.length > 0) {
+                setChatHistory(prev => [...prev, { id: Date.now().toString(), title: messages[0].text.substring(0, 20) + '...', messages }]);
+              }
+              setMessages([]); 
+              chatRef.current = null; 
+            }}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white"
             title="Clear Chat"
           >
             <RotateCcw className="w-4 h-4" />
             <span className="hidden sm:inline">Clear Chat</span>
+          </button>
+          <button 
+            onClick={() => setActiveFolder(activeFolder === 'history' ? null : 'history')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              activeFolder === 'history'
+                ? 'bg-rose-500/20 text-rose-400 hover:bg-rose-500/30' 
+                : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white'
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span className="hidden sm:inline">History</span>
           </button>
           <button 
             onClick={toggleScreenCast}
@@ -596,6 +830,28 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
           >
             {isCasting ? <MonitorOff className="w-4 h-4" /> : <Cast className="w-4 h-4" />}
             <span className="hidden sm:inline">{isCasting ? 'Stop Casting' : 'Screen Cast'}</span>
+          </button>
+          <button 
+            onClick={() => setActiveFolder(activeFolder === 'map' ? null : 'map')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              activeFolder === 'map'
+                ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' 
+                : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white'
+            }`}
+          >
+            <Map className="w-4 h-4" />
+            <span className="hidden sm:inline">Map</span>
+          </button>
+          <button 
+            onClick={() => setActiveFolder(activeFolder === 'book' ? null : 'book')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              activeFolder === 'book'
+                ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30' 
+                : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white'
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            <span className="hidden sm:inline">Book Gen</span>
           </button>
           <button 
             onClick={() => setActiveFolder(activeFolder === 'video' ? null : 'video')}
@@ -660,6 +916,63 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
           )}
         </AnimatePresence>
 
+        {/* History Panel */}
+        <AnimatePresence>
+          {activeFolder === 'history' && (
+            <motion.div 
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 320, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+            >
+              <div className="p-4 flex flex-col gap-4 w-80">
+                <h2 className="text-lg font-semibold text-white">Chat History</h2>
+                {chatHistory.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No chat history yet.</p>
+                ) : (
+                  chatHistory.map(session => (
+                    <button 
+                      key={session.id}
+                      onClick={() => { setMessages(session.messages); chatRef.current = null; }}
+                      className="w-full p-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-left text-sm truncate"
+                    >
+                      {session.title}
+                    </button>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Map Panel */}
+        <AnimatePresence>
+          {activeFolder === 'map' && (
+            <motion.div 
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 600, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+            >
+              <MapPanel />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Book Generator Panel */}
+        <AnimatePresence>
+          {activeFolder === 'book' && (
+            <motion.div 
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 600, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+            >
+              <BookGenerator />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Video Generation Panel */}
         <AnimatePresence>
           {activeFolder === 'video' && (
@@ -700,9 +1013,17 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 600, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden flex flex-col"
             >
-              <MhiexterBrowser />
+              <MhiexterBrowser onTranslate={handleTranslate} />
+              {isTranslating && <div className="p-4 text-center text-zinc-400">Translating...</div>}
+              {translatedContent && (
+                <div className="p-4 bg-zinc-800 text-white overflow-y-auto flex-1 border-t border-zinc-700">
+                  <h3 className="font-bold mb-2">Translation</h3>
+                  <p className="whitespace-pre-wrap">{translatedContent}</p>
+                  <button onClick={() => setTranslatedContent(null)} className="mt-2 text-xs text-zinc-400">Close</button>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -719,6 +1040,58 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
               <div className="p-4 flex flex-col gap-6 w-80">
                 <h2 className="text-lg font-semibold text-white">Settings</h2>
                 
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm text-zinc-400">Default Face</label>
+                  {defaultFace ? (
+                    <div className="flex items-center gap-2">
+                      <img src={defaultFace} alt="Default Face" className="w-12 h-12 rounded-full object-cover border border-zinc-700" />
+                      <button 
+                        onClick={() => { setDefaultFace(null); localStorage.removeItem('defaultFace'); }}
+                        className="text-xs text-red-400 hover:text-red-300"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => {
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = 'image/*';
+                        input.onchange = (e: any) => {
+                          const file = e.target.files[0];
+                          const reader = new FileReader();
+                          reader.onloadend = () => {
+                            const dataUrl = reader.result as string;
+                            setDefaultFace(dataUrl);
+                            localStorage.setItem('defaultFace', dataUrl);
+                          };
+                          reader.readAsDataURL(file);
+                        };
+                        input.click();
+                      }}
+                      className="p-2 bg-zinc-800 text-zinc-300 rounded-lg border border-zinc-700 hover:bg-zinc-700"
+                    >
+                      Upload Face
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm text-zinc-400">Preferred Language</label>
+                  <select 
+                    value={localStorage.getItem('preferredLanguage') || 'English'}
+                    onChange={(e) => localStorage.setItem('preferredLanguage', e.target.value)}
+                    className="p-2 bg-zinc-800 text-white rounded-lg border border-zinc-700"
+                  >
+                    <option>English</option>
+                    <option>Hausa</option>
+                    <option>French</option>
+                    <option>Spanish</option>
+                    <option>Arabic</option>
+                  </select>
+                </div>
+
                 <div className="flex flex-col gap-2">
                   <label className="text-sm text-zinc-400">Search Engine</label>
                   <select 
@@ -821,7 +1194,39 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
                           </button>
                         </div>
                         <div className="markdown-body">
-                          <Markdown>{msg.text}</Markdown>
+                          <Markdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{msg.text ? msg.text.replace(/```json\s*(\{[\s\S]*?"type":\s*"graph"[\s\S]*?\})\s*```/g, '').trim() : ''}</Markdown>
+                          {msg.groundingMetadata && msg.groundingMetadata.groundingChunks && (
+                            <div className="mt-4 p-4 bg-zinc-800 rounded-lg">
+                              <h4 className="text-sm font-semibold text-zinc-300 mb-2">Sources:</h4>
+                              <ul className="list-disc list-inside text-sm text-zinc-400">
+                                {msg.groundingMetadata.groundingChunks.map((chunk: any, idx: number) => (
+                                  chunk.web && (
+                                    <li key={idx}>
+                                      <a href={chunk.web.uri} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">
+                                        {chunk.web.title || chunk.web.uri}
+                                      </a>
+                                    </li>
+                                  )
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {(() => {
+                            const graphData = extractGraphData(msg.text || '');
+                            if (graphData) {
+                              return (
+                                <div className="mt-4">
+                                  <GraphRenderer 
+                                    data={graphData.data} 
+                                    xKey={graphData.xAxis} 
+                                    yKeys={Array.isArray(graphData.yAxis) ? graphData.yAxis : [graphData.yAxis]} 
+                                    showSlope={graphData.showSlope}
+                                  />
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                         {msg.generatedImage && (
                           <div className="mt-4 relative group inline-block">
@@ -927,6 +1332,14 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
               >
                 <ImagePlus className="w-5 h-5" />
               </button>
+              <button
+                type="button"
+                onClick={startCamera}
+                className="p-3 text-zinc-400 hover:text-indigo-400 transition-colors mb-0.5"
+                title="Take Photo"
+              >
+                <Camera className="w-5 h-5" />
+              </button>
               <input
                 type="file"
                 multiple
@@ -948,6 +1361,7 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
                 rows={1}
                 style={{ height: 'auto' }}
               />
+              <VoiceChat onToggle={(active) => console.log('Voice chat active:', active)} />
               <button 
                 type="submit" 
                 disabled={(!input.trim() && selectedImages.length === 0) || isTyping}
@@ -962,6 +1376,27 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       </div>
+
+      {/* Camera Preview Modal */}
+      <AnimatePresence>
+        {isCameraActive && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex flex-col bg-black"
+          >
+            <div className="relative flex-1 w-full h-full overflow-hidden">
+              <video ref={cameraVideoRef} autoPlay playsInline className="w-full h-full object-cover bg-black" />
+              <canvas ref={canvasRef} className="hidden" />
+              <div className="absolute bottom-0 left-0 right-0 p-6 flex justify-center gap-4 bg-gradient-to-t from-black/80 to-transparent">
+                <button onClick={stopCamera} className="px-6 py-3 bg-zinc-800/80 text-white rounded-full">Cancel</button>
+                <button onClick={captureCamera} className="px-6 py-3 bg-indigo-600/80 text-white rounded-full">Capture</button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Full Screen Image Modal */}
       <AnimatePresence>

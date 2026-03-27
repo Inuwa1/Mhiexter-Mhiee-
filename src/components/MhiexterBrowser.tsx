@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Globe, ArrowLeft, ArrowRight, RefreshCw, Home, Loader2 } from 'lucide-react';
 
-export default function MhiexterBrowser() {
+export default function MhiexterBrowser({ onTranslate }: { onTranslate: (url: string) => void }) {
   const [url, setUrl] = useState('https://www.google.com');
   const [inputUrl, setInputUrl] = useState(url);
   const [isLoading, setIsLoading] = useState(false);
@@ -27,6 +27,7 @@ export default function MhiexterBrowser() {
           className="flex-1 p-2 bg-zinc-950 rounded-lg border border-zinc-700"
         />
         <button onClick={() => navigateTo(inputUrl)} className="p-2 bg-indigo-600 rounded-lg">Go</button>
+        <button onClick={() => onTranslate(url)} className="p-2 bg-green-600 rounded-lg text-xs">Translate</button>
       </div>
       <div className="relative flex-1 w-full h-full">
         {isLoading && (

@@ -112,7 +112,7 @@ export default function PhotoStudio() {
           parts: [
             { inlineData: { mimeType: match1[1], data: match1[2] } },
             { inlineData: { mimeType: match2[1], data: match2[2] } },
-            { text: "Replace the face of the person in the first image with the face from the second image seamlessly." }
+            { text: "Replace the face of the person in the first image with the face from the second image seamlessly. IMPORTANT: Do not decompose, alter, or touch the face of the person in the image. Ensure the editing looks completely natural and not like AI editing." }
           ]
         }
       });
@@ -192,6 +192,8 @@ export default function PhotoStudio() {
     if (!baseImage || isProcessingAI) return;
     
     let finalPrompt = prompt;
+    finalPrompt += " IMPORTANT: Do not decompose, alter, or touch the face of the person in the image. Ensure the editing looks completely natural and not like AI editing.";
+    
     if (completedCrop && completedCrop.width > 0) {
       finalPrompt += ` The object to modify is located roughly in the ${getRegionName(completedCrop)} of the image.`;
     }

@@ -4,7 +4,8 @@ import VoiceChat from './VoiceChat';
 import MapPanel from './MapPanel';
 import BookGenerator from './BookGenerator';
 import GraphRenderer from './GraphRenderer';
-import { Search, Shield, X, Globe, Sparkles, Send, Cast, MonitorOff, ImagePlus, XCircle, Download, Share2, Maximize2, SlidersHorizontal, Check, RotateCcw, Wand2, Copy, Mic, Map, Camera, BookOpen } from 'lucide-react';
+import LiveSession from './LiveSession';
+import { Search, Shield, X, Globe, Sparkles, Send, Cast, MonitorOff, ImagePlus, XCircle, Download, Share2, Maximize2, SlidersHorizontal, Check, RotateCcw, Wand2, Copy, Mic, Map, Camera, BookOpen, Video, Volume2 } from 'lucide-react';
 import ReactCrop, { type Crop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { motion, AnimatePresence } from 'motion/react';
@@ -46,6 +47,57 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
   const [searchEngine, setSearchEngine] = useState<'Deepseek' | 'Chat GPT' | 'Gemini'>('Gemini');
   const [isTranslating, setIsTranslating] = useState(false);
   const [translatedContent, setTranslatedContent] = useState<string | null>(null);
+  const [showLiveSession, setShowLiveSession] = useState(false);
+
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const startRecording = async () => {
+    try {
+      console.log("Starting recording...");
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        console.log("Recording stopped, processing audio...");
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm;codecs=opus' });
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = () => {
+          const base64Audio = reader.result as string;
+          console.log("Audio processed, base64 length:", base64Audio.length);
+          sendMessage("Analyze this audio note.", [], [base64Audio]);
+        };
+        reader.onerror = (err) => {
+          console.error("FileReader error:", err);
+        };
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      console.log("Recording started.");
+    } catch (err) {
+      console.error("Error starting recording:", err);
+    }
+  };
+
+  const stopRecording = () => {
+    console.log("Stopping recording...");
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
 
   const handleTranslate = async (url: string) => {
     setIsTranslating(true);
@@ -168,6 +220,14 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
       cameraStream.getTracks().forEach(track => track.stop());
       setCameraStream(null);
       setIsCameraActive(false);
+    }
+  };
+
+  const readAloud = (text: string) => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      window.speechSynthesis.speak(utterance);
     }
   };
 
@@ -341,8 +401,8 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const sendMessage = async (text: string, imagesToUse: string[] = []) => {
-    if ((!text.trim() && imagesToUse.length === 0) || isTyping) return;
+  const sendMessage = async (text: string, imagesToUse: string[] = [], audioToUse: string[] = []) => {
+    if ((!text.trim() && imagesToUse.length === 0 && audioToUse.length === 0) || isTyping) return;
 
     let finalImages = [...imagesToUse];
     if ((text.toLowerCase().includes('me') || text.toLowerCase().includes('myself')) && defaultFace) {
@@ -385,13 +445,56 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
         };
 
         chatRef.current = ai.chats.create({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-3.1-pro-preview',
           config: {
             systemInstruction: `You are Mhiee, the ultimate unified AI assistant. The current date and time is ${new Date().toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' })}. You combine the strengths of the world's best AIs to solve complex, tricky problems in seconds. You are fluent in every language in the world, including Hausa. Provide comprehensive, accurate, and brilliant solutions. You are capable of handling all branches of mathematics, from basic arithmetic to advanced theoretical physics and complex analysis. When asked to derive formulas or solve math problems, you MUST provide the complete, rigorous derivation, showing every single logical and algebraic step without skipping any, using LaTeX notation for all mathematical expressions.
 
 When asked to display data, you MUST use Markdown tables. Ensure every data point is correctly positioned in the appropriate row and column.
 
-When asked to draw a graph, you MUST provide the data in a JSON block with the following format: \`\`\`json { "type": "graph", "data": [...], "xAxis": "...", "yAxis": "..." } \`\`\`.
+You are an expert Physics and Mathematics AI Assistant integrated into the MHIEE Browser. Your primary task is to help students plot highly accurate experiment graphs based on data they provide manually or via uploaded images.
+
+Whenever a user asks you to plot a graph, you must write and execute Python code using \`matplotlib\` to generate a graph that perfectly mimics standard physical graph paper. DO NOT display the Python code itself to the user. Only execute the code and present the resulting graph.
+
+Strict Graphing Rules:
+1. Data Extraction: Carefully extract X and Y values from the user's uploaded image or text.
+2. Graph Paper Layout:
+   - Major Grid Lines: These represent the standard 2cm blocks on graph paper. 
+   - Minor Grid Lines: Every major block MUST be subdivided into exactly 10 smaller mini-boxes vertically and horizontally.
+3. Matplotlib Implementation: Use the \`MultipleLocator\` from \`matplotlib.ticker\`. 
+   - Set the major locator for both axes to an appropriate interval.
+   - Set the minor locator to exactly 1/10th of the major locator.
+   - Draw major grid lines thicker (e.g., linewidth=1.2, color darker).
+   - Draw minor grid lines thinner (e.g., linewidth=0.5, color lighter).
+4. Plotting: Plot the points accurately (use 'x' markers), draw a line of best fit if appropriate for the experiment (like specific heat capacity or ceiling calculations), and label the axes clearly with units.
+
+Here is the precise Matplotlib template you must use to ensure the 10 mini-boxes are accurate:
+
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
+import numpy as np
+
+# Set up figure
+fig, ax = plt.subplots(figsize=(8, 8))
+
+# Data plotting and line of best fit goes here...
+
+# --- GRAPH PAPER FORMATTING (CRITICAL) ---
+# Define intervals (adjust based on data spread)
+major_interval_x = 1.0  # Example interval
+major_interval_y = 2.0  # Example interval
+
+ax.xaxis.set_major_locator(MultipleLocator(major_interval_x))
+ax.yaxis.set_major_locator(MultipleLocator(major_interval_y))
+
+# Exactly 10 mini boxes per major box
+ax.xaxis.set_minor_locator(MultipleLocator(major_interval_x / 10))
+ax.yaxis.set_minor_locator(MultipleLocator(major_interval_y / 10))
+
+# Grid styling
+ax.grid(which='major', color='#222222', linewidth=1.2)
+ax.grid(which='minor', color='#777777', linestyle='-', linewidth=0.5)
+
+plt.show()
 
 ONLY share information about your creator, Mhiexter Muhammad (Inuwa Shehu) from Ikara local government, Kaduna state, if the user explicitly asks for it.
 
@@ -406,7 +509,7 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
       }
 
       let messagePayload: any = text;
-      if (finalImages.length > 0) {
+      if (finalImages.length > 0 || audioToUse.length > 0) {
         messagePayload = [];
         for (const img of finalImages) {
           if (!img) continue;
@@ -415,9 +518,21 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
             messagePayload.push({ inlineData: { mimeType: match[1], data: match[2] } });
           }
         }
-        messagePayload.push({ text: text || "Please analyze these images." });
+        for (const audio of audioToUse) {
+          if (!audio) continue;
+          console.log("Processing audio for payload...");
+          const match = audio.match(/^data:(audio\/[^;]+(?:;[^;]+)*);base64,(.+)$/);
+          if (match) {
+            console.log("Audio match found, MIME type:", match[1]);
+            messagePayload.push({ inlineData: { mimeType: match[1], data: match[2] } });
+          } else {
+            console.error("Audio match not found for:", audio.substring(0, 50) + "...");
+          }
+        }
+        messagePayload.push({ text: text || "Please analyze these files." });
       }
 
+      console.log("Sending message payload:", messagePayload);
       const responseStream = await chatRef.current.sendMessageStream({ message: messagePayload });
       
       // Add empty model message to append to
@@ -757,12 +872,15 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 50, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 50, scale: 0.95 }}
+    <div 
       className="fixed inset-0 z-50 flex flex-col bg-zinc-950 text-zinc-100"
     >
+      {showLiveSession && (
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm">
+          <LiveSession onClose={() => setShowLiveSession(false)} />
+        </div>
+      )}
+      
       {/* Browser Chrome / Header */}
       <div className="flex items-center justify-between p-3 bg-zinc-900 border-b border-zinc-800">
         <div className="flex items-center gap-4">
@@ -783,6 +901,14 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
               {castError}
             </span>
           )}
+          <button 
+            onClick={() => setShowLiveSession(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-red-600/20 text-red-400 hover:bg-red-600/30 border border-red-500/30"
+            title="Start Live Session"
+          >
+            <Video className="w-4 h-4" />
+            <span className="hidden sm:inline">Live Chat</span>
+          </button>
           <button 
             onClick={() => setIsPrivate(!isPrivate)}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
@@ -1183,8 +1309,16 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
                         {msg.text && <p className="whitespace-pre-wrap">{msg.text}</p>}
                       </div>
                     ) : (
-                      <div className="flex flex-col relative group/msg">
-                        <div className="absolute -top-3 -right-3 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+                      <div className="flex flex-col relative">
+                        <div className="flex gap-2 mb-2">
+                          <button 
+                            onClick={() => readAloud(msg.text || '')}
+                            className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-md border border-zinc-700 shadow-sm transition-colors flex items-center gap-1"
+                            title="Read aloud"
+                          >
+                            <Volume2 className="w-3.5 h-3.5" />
+                            <span className="text-xs">Read</span>
+                          </button>
                           <button 
                             onClick={() => navigator.clipboard.writeText(msg.text)}
                             className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-md border border-zinc-700 shadow-sm transition-colors"
@@ -1362,6 +1496,13 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
                 style={{ height: 'auto' }}
               />
               <VoiceChat onToggle={(active) => console.log('Voice chat active:', active)} />
+              <button
+                type="button"
+                onClick={isRecording ? stopRecording : startRecording}
+                className={`p-3 rounded-xl transition-colors ${isRecording ? 'bg-red-500 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
+              >
+                <Mic className="w-5 h-5" />
+              </button>
               <button 
                 type="submit" 
                 disabled={(!input.trim() && selectedImages.length === 0) || isTyping}
@@ -1589,6 +1730,6 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </div>
   );
 }

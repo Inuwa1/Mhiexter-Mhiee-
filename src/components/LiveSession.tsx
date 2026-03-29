@@ -8,7 +8,7 @@ export default function LiveSession({ onClose }: { onClose: () => void }) {
   const [chatInput, setChatInput] = useState('');
   const [messages, setMessages] = useState<{role: 'user' | 'model', text: string}[]>([{role: 'model', text: 'How can I help you today?'}]);
   
-  const { isLive, facingMode, videoRef, canvasRef, startLiveSession, sessionRef } = useLiveSession();
+  const { isLive, facingMode, videoRef, canvasRef, startLiveSession, sessionRef, transcription } = useLiveSession();
 
   const sendMessage = () => {
     if (chatInput.trim() && sessionRef.current) {
@@ -44,6 +44,14 @@ export default function LiveSession({ onClose }: { onClose: () => void }) {
         <div className="relative w-full h-full flex flex-col items-center justify-center">
           <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`} />
           <canvas ref={canvasRef} width="640" height="480" className="hidden" />
+          
+          {/* Transcription Overlay */}
+          {transcription && (
+            <div className="absolute bottom-24 left-4 right-4 bg-black/60 text-white text-lg p-4 rounded-xl backdrop-blur-sm text-center">
+              {transcription}
+            </div>
+          )}
+
           {isLive && (
             <div className="absolute top-4 left-4 bg-indigo-600/80 text-white px-4 py-2 rounded-full flex items-center gap-2 backdrop-blur-sm">
               <MonitorPlay className="w-4 h-4" />

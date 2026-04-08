@@ -8,7 +8,7 @@ import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Settings, MonitorPla
 import { motion, AnimatePresence } from 'motion/react';
 import FileShare from './components/FileShare';
 import MhieeBrowser from './components/MhieeBrowser';
-import PhotoStudio from './components/PhotoStudio';
+import VoiceChat from './components/VoiceChat';
 
 export default function App() {
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
@@ -20,6 +20,8 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
+  const [isKeyLoaded, setIsKeyLoaded] = useState(false);
+  const [keyError, setKeyError] = useState<string | null>(null);
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -31,6 +33,31 @@ export default function App() {
   const [previewPosition, setPreviewPosition] = useState(0);
   const [showPreview, setShowPreview] = useState(false);
   const [activeTab, setActiveTab] = useState<'video' | 'photo'>('video');
+
+  useEffect(() => {
+    const fetchConfig = async (retries = 3) => {
+      try {
+        const res = await fetch('/api/config');
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        const data = await res.json();
+        if (!data.GEMINI_API_KEY || data.GEMINI_API_KEY === "MISSING_KEY") {
+          setKeyError("API key is missing on the server. Please check the environment configuration.");
+        } else {
+          (window as any).GEMINI_API_KEY = data.GEMINI_API_KEY;
+          setIsKeyLoaded(true);
+        }
+      } catch (err: any) {
+        if (retries > 0) {
+          console.warn(`Retrying config fetch... (${retries} attempts left)`);
+          setTimeout(() => fetchConfig(retries - 1), 1000);
+        } else {
+          console.error("Error fetching config:", err);
+          setKeyError(`Failed to fetch API configuration: ${err.message}`);
+        }
+      }
+    };
+    fetchConfig();
+  }, []);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -266,14 +293,14 @@ export default function App() {
       )}
 
       {/* Error Message */}
-      {errorMessage && (
+      {(errorMessage || keyError) && (
         <motion.div 
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -20 }}
           className="fixed top-4 z-50 bg-red-500/90 text-white px-6 py-3 rounded-xl shadow-xl font-medium backdrop-blur-sm"
         >
-          {errorMessage}
+          {errorMessage || keyError}
         </motion.div>
       )}
 
@@ -329,7 +356,17 @@ export default function App() {
 
       {/* Browser Modal */}
       <AnimatePresence>
-        {showBrowser && <MhieeBrowser onClose={() => setShowBrowser(false)} />}
+        {showBrowser && isKeyLoaded && <MhieeBrowser onClose={() => setShowBrowser(false)} />}
+        {showBrowser && !isKeyLoaded && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm text-white"
+          >
+            Loading API Configuration...
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* Share Modal */}
@@ -588,7 +625,7 @@ export default function App() {
         )}
         </div>
       ) : (
-        <PhotoStudio />
+        <div className="text-zinc-500">Editor Layout Not Available</div>
       )}
     </div>
   );

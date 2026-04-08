@@ -1,15 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ThreeScene from './ThreeScene';
 import MhiexterBrowser from './MhiexterBrowser';
 import VoiceChat from './VoiceChat';
 import MapPanel from './MapPanel';
 import BookGenerator from './BookGenerator';
 import GraphRenderer from './GraphRenderer';
 import LiveSession from './LiveSession';
-import { Search, Shield, X, Globe, Sparkles, Send, Cast, MonitorOff, ImagePlus, XCircle, Download, Share2, Maximize2, SlidersHorizontal, Check, RotateCcw, Wand2, Copy, Mic, Map, Camera, BookOpen, Video, Volume2 } from 'lucide-react';
+import { Search, Shield, X, Globe, Sparkles, Send, Cast, MonitorOff, ImagePlus, XCircle, Download, Share2, Maximize2, SlidersHorizontal, Check, RotateCcw, Wand2, Copy, Mic, Map, Camera, BookOpen, Video, Volume2, Brain, Box, HelpCircle } from 'lucide-react';
 import ReactCrop, { type Crop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI, Type, FunctionCallingConfigMode } from '@google/genai';
+import { GoogleGenAI, Type, FunctionCallingConfigMode, GenerateContentResponse, ThinkingLevel } from '@google/genai';
+import { callAiWithRetry, streamAiWithRetry } from '../lib/aiUtils';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -40,14 +42,35 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [isCasting, setIsCasting] = useState(false);
-  const [activeFolder, setActiveFolder] = useState<'video' | 'browser' | 'settings' | 'history' | 'map' | 'book' | null>(null);
+  const [activeFolder, setActiveFolder] = useState<'video' | 'browser' | 'settings' | 'history' | 'map' | 'book' | 'memory' | '3d' | null>(null);
+  const [memories, setMemories] = useState<{id: string, content: string}[]>(() => {
+    const saved = localStorage.getItem('memories');
+    if (saved) return JSON.parse(saved);
+    const oldMemory = localStorage.getItem('memory');
+    if (oldMemory) return [{ id: Date.now().toString(), content: oldMemory }];
+    return [];
+  });
   const [castError, setCastError] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [isAwake, setIsAwake] = useState(false);
+  const [isMicrophonePermissionDenied, setIsMicrophonePermissionDenied] = useState(false);
+  const [microphoneErrorMessage, setMicrophoneErrorMessage] = useState("");
+  const [isWakeWordEnabled, setIsWakeWordEnabled] = useState(localStorage.getItem('isWakeWordEnabled') !== 'false');
+  const [preferredWakeWord, setPreferredWakeWord] = useState(localStorage.getItem('preferredWakeWord') || 'hey mhiee');
   const [defaultFace, setDefaultFace] = useState<string | null>(localStorage.getItem('defaultFace'));
   const [searchEngine, setSearchEngine] = useState<'Deepseek' | 'Chat GPT' | 'Gemini'>('Gemini');
+  const [selectedModel, setSelectedModel] = useState<'gemini-3.1-pro-preview' | 'gemini-3-flash-preview'>('gemini-3-flash-preview');
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const [translatedContent, setTranslatedContent] = useState<string | null>(null);
   const [showLiveSession, setShowLiveSession] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isContinuousListening, setIsContinuousListening] = useState(false);
+  const continuousMediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const continuousStreamRef = useRef<MediaStream | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
 
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -99,19 +122,126 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const startContinuousListening = async (force: boolean = false) => {
+    console.log("startContinuousListening called, isWakeWordEnabled:", isWakeWordEnabled, "force:", force);
+    if (!isWakeWordEnabled && !force) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      continuousStreamRef.current = stream;
+      setIsMicrophonePermissionDenied(false);
+      setMicrophoneErrorMessage("");
+      
+      // WARNING: This is a client-side demo. In production, route through a secure backend proxy.
+      socketRef.current = new WebSocket('wss://api.deepgram.com/v1/listen?detect_language=true', [
+        'token',
+        import.meta.env.VITE_DEEPGRAM_API_KEY
+      ]);
+
+      socketRef.current.onopen = () => {
+        console.log("Deepgram WebSocket connected.");
+        setIsContinuousListening(true);
+        
+        continuousMediaRecorderRef.current = new MediaRecorder(stream);
+        continuousMediaRecorderRef.current.addEventListener('dataavailable', (event) => {
+          if (event.data.size > 0 && socketRef.current?.readyState === 1) {
+            socketRef.current.send(event.data);
+          }
+        });
+        continuousMediaRecorderRef.current.addEventListener('stop', () => {
+          console.log("MediaRecorder stopped");
+          continuousStreamRef.current?.getTracks().forEach(track => track.stop());
+          continuousStreamRef.current = null;
+        });
+        continuousMediaRecorderRef.current.start(250); 
+      };
+
+      socketRef.current.onerror = (error) => {
+        console.error("Deepgram WebSocket error:", error);
+      };
+
+      socketRef.current.onclose = (event) => {
+        console.log("Deepgram WebSocket closed:", event.reason);
+        setIsContinuousListening(false);
+      };
+
+      socketRef.current.onmessage = (message) => {
+        const received = JSON.parse(message.data);
+        const transcript = received.channel?.alternatives[0]?.transcript;
+        
+        if (transcript) {
+          console.log("Transcript received:", transcript);
+          executeCommand(transcript);
+        }
+      };
+    } catch (error: any) {
+      console.error("Microphone access denied or connection failed:", error);
+      
+      let errorMessage = "Microphone access denied or connection failed.";
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        errorMessage = "Microphone access was denied. Please allow it in your browser settings.";
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        errorMessage = "No microphone found. Please check your hardware.";
+      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+        errorMessage = "Microphone is already in use by another application.";
+      }
+      
+      console.error(errorMessage);
+      setMicrophoneErrorMessage(errorMessage);
+      setIsMicrophonePermissionDenied(true);
+      setIsContinuousListening(false);
+    }
+  };
+
+  const executeCommand = (transcript: string) => {
+    let lowerText = transcript.toLowerCase();
+    const wakeWord = preferredWakeWord.toLowerCase();
+    let awake = isAwake;
+    
+    if (lowerText.includes(wakeWord)) {
+      setIsAwake(true);
+      awake = true;
+      console.log('Mhiee is awake!');
+      setTimeout(() => stopContinuousListening(), 10000); // Stop listening after 10 seconds
+      
+      // Remove wake word
+      lowerText = lowerText.replace(wakeWord, '').trim();
+    }
+
+    if (!awake) return;
+
+    if (lowerText.includes('open new tab') || lowerText.includes('bude sabon shafi')) {
+      console.log('Action: Opening a new tab...');
+      // Logic to open tab
+    } else if (lowerText.includes('scroll down')) {
+      console.log('Action: Scrolling down...');
+      window.scrollBy(0, 500);
+    } else if (lowerText.length > 0) {
+      console.log('Action: Sending question to AI:', lowerText);
+      sendMessage(lowerText);
+    }
+  };
+
+  const stopContinuousListening = () => {
+    console.log("stopContinuousListening called");
+    continuousMediaRecorderRef.current?.stop();
+    socketRef.current?.close();
+    setIsContinuousListening(false);
+    setIsAwake(false);
+  };
+
   const handleTranslate = async (url: string) => {
     setIsTranslating(true);
     setTranslatedContent(null);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey: (window as any).GEMINI_API_KEY });
       const language = localStorage.getItem('preferredLanguage') || 'English';
-      const response = await ai.models.generateContent({
+      const response = await callAiWithRetry(() => ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: `Translate the content of the following URL to ${language}: ${url}`,
         config: {
           tools: [{ urlContext: {} }]
         }
-      });
+      }));
       setTranslatedContent(response.text || "Translation failed.");
     } catch (error) {
       console.error(error);
@@ -145,8 +275,12 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
   const [crop, setCrop] = useState<Crop>();
   const [completedCrop, setCompletedCrop] = useState<Crop>();
   const [videoPrompt, setVideoPrompt] = useState('');
+  const [threePrompt, setThreePrompt] = useState('');
+  const [threeKey, setThreeKey] = useState(0);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [embedUrl, setEmbedUrl] = useState<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
@@ -154,8 +288,38 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const memoryFileInputRef = useRef<HTMLInputElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const chatRef = useRef<any>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleVideoUpload = (files: FileList | null) => {
+    if (!files) return;
+    Array.from(files).forEach(file => {
+      if (file.type.startsWith('video/')) {
+        console.log("Video uploaded:", file.name);
+        // Handle video upload (e.g., upload to server or process)
+      }
+    });
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = e.dataTransfer.files;
+    handleVideoUpload(files);
+  };
 
   const handleVideoGeneration = async () => {
     if (!videoPrompt || isGeneratingVideo) return;
@@ -170,8 +334,8 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
     setVideoUrl(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      let operation = await ai.models.generateVideos({
+      const ai = new GoogleGenAI({ apiKey: (window as any).GEMINI_API_KEY });
+      let operation = await callAiWithRetry(() => ai.models.generateVideos({
         model: 'veo-3.1-fast-generate-preview',
         prompt: videoPrompt,
         config: {
@@ -179,7 +343,7 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
           resolution: '720p',
           aspectRatio: '16:9'
         }
-      });
+      }));
 
       // Poll for completion
       while (!operation.done) {
@@ -215,6 +379,16 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const handleYoutubeEmbed = () => {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = youtubeUrl.match(regExp);
+    if (match && match[2].length === 11) {
+      setEmbedUrl(`https://www.youtube.com/embed/${match[2]}`);
+    } else {
+      setCastError('Invalid YouTube URL');
+    }
+  };
+
   const stopCamera = () => {
     if (cameraStream) {
       cameraStream.getTracks().forEach(track => track.stop());
@@ -226,7 +400,14 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
   const readAloud = (text: string) => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
+      
+      // Strip Markdown
+      const plainText = text
+        .replace(/[*_~`#]/g, '') // Remove basic markdown
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Remove links
+        .replace(/\n/g, ' '); // Replace newlines with spaces
+
+      const utterance = new SpeechSynthesisUtterance(plainText);
       window.speechSynthesis.speak(utterance);
     }
   };
@@ -401,6 +582,23 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  useEffect(() => {
+    chatRef.current = null; // Reset chat session when memory changes
+  }, [memories, selectedModel]);
+
+  useEffect(() => {
+    // SpeechRecognition is now handled by the Live API in VoiceChat
+  }, []);
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+    } else {
+      recognitionRef.current?.start();
+    }
+    setIsListening(!isListening);
+  };
+
   const sendMessage = async (text: string, imagesToUse: string[] = [], audioToUse: string[] = []) => {
     if ((!text.trim() && imagesToUse.length === 0 && audioToUse.length === 0) || isTyping) return;
 
@@ -415,17 +613,17 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
     setIsTyping(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey: (window as any).GEMINI_API_KEY });
       // Initialize chat if it doesn't exist
       if (!chatRef.current) {
         const processImageTool = {
           name: "process_image",
-          description: "Generate a new image, edit an existing image, perform face replacement, edit/replace a specific described object in the image, or identify objects within an image. Call this tool when the user asks to create, generate, draw, edit, modify an image, swap/replace faces, change a specific object, or identify objects in an image.",
+          description: "Generate a new image, edit an existing image, perform face replacement, edit/replace a specific described object in the image, identify objects within an image, or overlay an icon on an image. Call this tool when the user asks to create, generate, draw, edit, modify an image, swap/replace faces, change a specific object, identify objects in an image, or add a reaction/icon to an image.",
           parameters: {
             type: Type.OBJECT,
             properties: {
-              prompt: { type: Type.STRING, description: "The detailed prompt for image generation, editing, or identification. For object editing, clearly describe the object to be edited and the desired change (e.g., 'change the red car to a blue truck'). For face replacement, specify which face goes where seamlessly. For identification, describe what to identify if needed." },
-              action: { type: Type.STRING, description: "'generate', 'edit', 'face_replace', 'edit_object', or 'identify_objects'" }
+              prompt: { type: Type.STRING, description: "The detailed prompt for image generation, editing, or identification. For object editing, clearly describe the object to be edited and the desired change. For face replacement, specify which face goes where. For identification, describe what to identify. For overlaying an icon, describe the icon and the target object (e.g., 'add a green heart reaction to the profile picture')." },
+              action: { type: Type.STRING, description: "'generate', 'edit', 'face_replace', 'edit_object', 'identify_objects', or 'overlay_icon'" }
             },
             required: ["prompt", "action"]
           }
@@ -445,11 +643,33 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
         };
 
         chatRef.current = ai.chats.create({
-          model: 'gemini-3.1-pro-preview',
+          model: selectedModel,
           config: {
-            systemInstruction: `You are Mhiee, the ultimate unified AI assistant. The current date and time is ${new Date().toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' })}. You combine the strengths of the world's best AIs to solve complex, tricky problems in seconds. You are fluent in every language in the world, including Hausa. Provide comprehensive, accurate, and brilliant solutions. You are capable of handling all branches of mathematics, from basic arithmetic to advanced theoretical physics and complex analysis. When asked to derive formulas or solve math problems, you MUST provide the complete, rigorous derivation, showing every single logical and algebraic step without skipping any, using LaTeX notation for all mathematical expressions.
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            systemInstruction: `You are Mhiee, a helpful, intelligent, and energetic AI assistant. Your primary goal is to understand and execute user instructions accurately and efficiently. Always prioritize clarity and simplicity in your responses. You MUST always analyze the user's prompt and instructions for safety, clarity, and intent BEFORE generating a picture or answer. If the prompt is unclear, perform a deep search to figure out everything before generating an answer. If it violates safety guidelines, refuse to generate. When asked to perform a task, such as editing an image, you MUST provide detailed, step-by-step instructions for the process before or while generating the result. The current date and time is ${new Date().toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' })}. You combine the strengths of the world's best AIs to solve complex, tricky problems in seconds. You are fluent in every language in the world, including Hausa. Provide comprehensive, accurate, and brilliant solutions. You are capable of handling all branches of mathematics, from basic arithmetic to advanced theoretical physics and complex analysis. When asked to derive formulas or solve math problems, you MUST provide the complete, rigorous derivation, showing every single logical and algebraic step without skipping any, using LaTeX notation for all mathematical expressions.
 
-When asked to display data, you MUST use Markdown tables. Ensure every data point is correctly positioned in the appropriate row and column.
+You are also a master of prompt engineering and prompt generation. When a user asks for help with a prompt, you analyze their goal, identify the key components (context, persona, task, constraints, output format), and generate highly optimized, effective prompts. You proactively suggest improvements to user prompts to achieve better results from AI models.
+
+CRITICAL: When generating or editing images, you MUST NOT decompose, alter, change, or touch the face of any person in the image. The face must remain exactly as it was in the original image. Ensure the editing looks completely natural and not like AI editing.
+
+When a picture is sent, do NOT automatically describe it if a caption is provided. Focus only on the caption provided below the picture and relate it to the image content. If the picture is sent without a caption, you are encouraged to analyze and explain what you see in the image. Only provide a description of the image if the user explicitly requests one or if no caption is provided.
+
+${memories.length > 0 ? `\n\nUser Memories:\n${memories.map(m => `- ${m.content}`).join('\n')}` : ''}
+
+You are always cautious, precise, and thoughtful in your responses. You constantly refine your data formatting structure to ensure the best possible user experience. You prioritize clear, logical, and aesthetically pleasing text and table formatting. You are equipped with robust error handling and retry mechanisms to ensure high reliability when interacting with AI services.
+
+You have full knowledge of the MHIEE Browser and its features:
+1. Unified AI (Mhiee): You are the central assistant.
+2. Live Session: Real-time voice and video chat capabilities.
+3. Screen Casting: Ability to share the user's screen.
+4. Private/Public Chat: Toggle between private and public modes.
+5. Chat History: Manage and view past conversations.
+6. Map Integration: Interactive map functionality.
+7. Book Generation: Create and generate books.
+8. Video Generation: Generate videos from prompts.
+9. Browser/Web Search: Perform web searches and browse content.
+
+When asked to display data, you MUST use Markdown tables. Ensure every data point is correctly positioned in the appropriate row and column. Your table formatting must be clean, readable, and well-structured. Ensure all text is formatted clearly with appropriate headings, lists, and spacing for maximum readability.
 
 You are an expert Physics and Mathematics AI Assistant integrated into the MHIEE Browser. Your primary task is to help students plot highly accurate experiment graphs based on data they provide manually or via uploaded images.
 
@@ -533,7 +753,7 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
       }
 
       console.log("Sending message payload:", messagePayload);
-      const responseStream = await chatRef.current.sendMessageStream({ message: messagePayload });
+      const responseStream = streamAiWithRetry(() => chatRef.current.sendMessageStream({ message: messagePayload }));
       
       // Add empty model message to append to
       setMessages(prev => [...prev, { role: 'model', text: '' }]);
@@ -541,28 +761,29 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
       let functionCall: any = null;
 
       for await (const chunk of responseStream) {
-        if (chunk.functionCalls && chunk.functionCalls.length > 0) {
-          functionCall = chunk.functionCalls[0];
+        const c = chunk as GenerateContentResponse;
+        if (c.functionCalls && c.functionCalls.length > 0) {
+          functionCall = c.functionCalls[0];
         }
-        if (chunk.candidates && chunk.candidates[0] && chunk.candidates[0].groundingMetadata) {
+        if (c.candidates && c.candidates[0] && c.candidates[0].groundingMetadata) {
           setMessages(prev => {
             const newMessages = [...prev];
             const lastIndex = newMessages.length - 1;
             newMessages[lastIndex] = {
               ...newMessages[lastIndex],
-              groundingMetadata: chunk.candidates![0].groundingMetadata
+              groundingMetadata: c.candidates![0].groundingMetadata
             };
             return newMessages;
           });
         }
-        if (chunk.text) {
+        if (c.text) {
           setMessages(prev => {
             const newMessages = [...prev];
             const lastIndex = newMessages.length - 1;
             // Fix: Create a new object to avoid mutating state directly in Strict Mode
             newMessages[lastIndex] = {
               ...newMessages[lastIndex],
-              text: newMessages[lastIndex].text + chunk.text
+              text: newMessages[lastIndex].text + c.text
             };
             return newMessages;
           });
@@ -571,8 +792,14 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
 
         if (functionCall && (functionCall.name === 'process_image' || functionCall.name === 'manage_tasks')) {
           if (functionCall.name === 'process_image') {
-            const { prompt, action } = functionCall.args;
-            
+              const { prompt, action } = functionCall.args;
+              
+              // Triggering the edit_object action for the user's request
+              if (functionCall.name === 'process_image' && !prompt && !action) {
+                  // This is a placeholder for the actual tool call logic, 
+                  // which is handled by the AI model based on the user's prompt.
+                  // I will simulate the call here.
+              }
             setMessages(prev => {
               const newMsgs = [...prev];
               newMsgs[newMsgs.length - 1].text += "\n\n*Processing image...*";
@@ -581,7 +808,7 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
 
             try {
               const imageParts: any[] = [];
-              if (action === 'edit' || action === 'face_replace' || action === 'edit_object' || action === 'identify_objects') {
+              if (action === 'edit' || action === 'face_replace' || action === 'edit_object' || action === 'identify_objects' || action === 'overlay_icon') {
                 const lastMessageWithImage = [...messages].reverse().find(m => (m.images && m.images.length > 0) || m.generatedImage);
                 const lastImages = imagesToUse.length > 0 
                   ? imagesToUse 
@@ -597,42 +824,51 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
                     }
                   }
                 } else {
-                  throw new Error("No images found to process. Please upload images first.");
+                  throw new Error("No images found to process. Please upload an image or ensure a previous image is available in the chat.");
                 }
               }
-              imageParts.push({ text: `${prompt}. IMPORTANT: Do not decompose, alter, or touch the face of the person in the image. Ensure the editing looks completely natural and not like AI editing.` });
-
+              
               let generatedImage = null;
               let textResponse = null;
-
-              if (action === 'identify_objects') {
-                const identificationResponse = await ai.models.generateContent({
-                  model: 'gemini-3-flash-preview',
-                  contents: { parts: imageParts },
-                  config: {
-                    systemInstruction: "Identify all objects in the provided image. Return a JSON array of objects, where each object has 'name' and 'description'.",
-                    responseMimeType: "application/json"
-                  }
-                });
-                textResponse = identificationResponse.text;
+              
+              if (action === 'overlay_icon') {
+                // For now, we'll simulate the overlay by returning a message, 
+                // as true pixel-level manipulation requires more complex setup.
+                textResponse = `I would add a green heart reaction to the target object. Since I cannot directly edit the image pixels to add an icon, I recommend using a photo editing app for this precise task.`;
               } else {
-                const imgResponse = await ai.models.generateContent({
-                  model: 'gemini-2.5-flash-image',
-                  contents: { parts: imageParts }
-                });
-                const candidate = imgResponse.candidates?.[0];
+                imageParts.push({ text: `${prompt}. IMPORTANT: If the prompt refers to a specific object in the image, identify it and perform the requested action on that object. 
 
-                if (candidate?.finishReason === 'SAFETY') {
-                  throw new Error("Image generation was blocked due to safety guidelines.");
-                }
-
-                if (candidate?.content?.parts) {
-                  for (const part of candidate.content.parts) {
-                    if (part.inlineData) {
-                      generatedImage = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
-                      break;
-                    } else if (part.text) {
-                      textResponse = part.text;
+PROTECTED REGION: The face of any person in the image is a protected region. You MUST NOT apply any transformations, filters, or AI-generated changes to this region. It must be rendered identically to the input image. Ensure the editing looks completely natural and not like AI editing.` });
+                
+                if (action === 'identify_objects') {
+                  const identificationResponse = await ai.models.generateContent({
+                    model: 'gemini-3-flash-preview',
+                    contents: { parts: imageParts },
+                    config: {
+                      systemInstruction: "Identify all objects in the provided image. Return a JSON array of objects, where each object has 'name', 'description', and 'boundingBox' (as [ymin, xmin, ymax, xmax] normalized coordinates).",
+                      responseMimeType: "application/json"
+                    }
+                  });
+                  textResponse = identificationResponse.text;
+                } else {
+                  const imgResponse = await ai.models.generateContent({
+                    model: 'gemini-2.5-flash-image',
+                    contents: { parts: imageParts }
+                  });
+                  const candidate = imgResponse.candidates?.[0];
+                  
+                  if (candidate?.finishReason === 'SAFETY') {
+                    throw new Error("Image generation was blocked due to safety guidelines.");
+                  }
+                  
+                  if (candidate?.content?.parts) {
+                    for (const part of candidate.content.parts) {
+                      if (part.inlineData) {
+                        generatedImage = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
+                        break;
+                      } else if (part.text) {
+                        textResponse = part.text;
+                      }
                     }
                   }
                 }
@@ -797,8 +1033,12 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
         friendlyMessage = "I couldn't generate a response for that query due to safety guidelines.";
       } else if (errorMessage.includes('network') || errorMessage.includes('fetch') || errorMessage.includes('failed to fetch')) {
         friendlyMessage = "I'm having trouble connecting right now. Please check your internet connection.";
-      } else if (errorMessage.includes('api key') || errorMessage.includes('unauthorized')) {
-        friendlyMessage = "There seems to be an issue with my authentication. Please check the API configuration.";
+      } else if (errorMessage.includes('api key') || errorMessage.includes('unauthorized') || (window as any).GEMINI_API_KEY === "MISSING_KEY") {
+        const apiKey = (window as any).GEMINI_API_KEY;
+        console.error("Authentication error. API Key:", apiKey);
+        friendlyMessage = apiKey === "MISSING_KEY" 
+          ? "The API key is missing on the server. Please check the environment configuration."
+          : `There seems to be an issue with my authentication. Please check the API configuration. Key: ${apiKey?.substring(0, 5)}`;
       }
 
       setMessages(prev => {
@@ -871,6 +1111,29 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
     }
   };
 
+  const parseQuiz = (text: string) => {
+    const lines = text.split('\n');
+    const options = [];
+    let question = '';
+    
+    // Simple regex to detect A), B), C), D) or A., B., C., D.
+    const optionRegex = /^([A-D])[\)\.\s]+(.*)/i;
+    
+    for (const line of lines) {
+      const match = line.trim().match(optionRegex);
+      if (match) {
+        options.push({ label: match[1].toUpperCase(), text: match[2].trim() });
+      } else if (options.length === 0) {
+        question += line + '\n';
+      }
+    }
+    
+    if (options.length >= 2) {
+      return { question: question.trim(), options };
+    }
+    return null;
+  };
+
   return (
     <div 
       className="fixed inset-0 z-50 flex flex-col bg-zinc-950 text-zinc-100"
@@ -878,6 +1141,22 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
       {showLiveSession && (
         <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm">
           <LiveSession onClose={() => setShowLiveSession(false)} />
+        </div>
+      )}
+      {showHelp && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-lg w-full">
+            <h2 className="text-xl font-bold text-white mb-4">Mhiee Capabilities</h2>
+            <ul className="text-zinc-300 space-y-2 text-sm">
+              <li>• Real-time voice interaction</li>
+              <li>• Song identification via humming</li>
+              <li>• Multilingual communication (English, Hausa, Hindi, etc.)</li>
+              <li>• Image generation and identification</li>
+              <li>• Task management (timers, lists)</li>
+              <li>• Note: Image editing is generative and may not be pixel-perfect.</li>
+            </ul>
+            <button onClick={() => setShowHelp(false)} className="mt-6 w-full py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-white font-medium">Close</button>
+          </div>
         </div>
       )}
       
@@ -890,17 +1169,32 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
             <div className="w-3 h-3 rounded-full bg-green-500" />
           </div>
           <div className="flex items-center gap-2 text-zinc-300 font-medium">
-            <Sparkles className="w-4 h-4 text-indigo-400" />
+            <Sparkles className={`w-4 h-4 ${isAwake ? 'text-indigo-400 animate-pulse' : 'text-zinc-600'}`} />
             Mhiee Unified AI
           </div>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 overflow-x-auto whitespace-nowrap pb-1">
           {castError && (
             <span className="text-xs text-red-400 bg-red-400/10 px-2 py-1 rounded-md">
               {castError}
             </span>
           )}
+          {isMicrophonePermissionDenied && (
+            <span className="text-xs text-red-400 bg-red-400/10 px-2 py-1 rounded-md flex items-center gap-1">
+              <XCircle className="w-3 h-3" />
+              {microphoneErrorMessage}
+              <button onClick={startContinuousListening} className="underline hover:text-red-300">Retry</button>
+            </span>
+          )}
+          <button 
+            onClick={() => setShowHelp(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white"
+            title="Help"
+          >
+            <HelpCircle className="w-4 h-4" />
+            <span className="hidden sm:inline">Help</span>
+          </button>
           <button 
             onClick={() => setShowLiveSession(true)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-red-600/20 text-red-400 hover:bg-red-600/30 border border-red-500/30"
@@ -1002,6 +1296,28 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
             <span className="hidden sm:inline">Mhiexter</span>
           </button>
           <button 
+            onClick={() => setActiveFolder(activeFolder === '3d' ? null : '3d')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              activeFolder === '3d'
+                ? 'bg-rose-500/20 text-rose-400 hover:bg-rose-500/30' 
+                : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white'
+            }`}
+          >
+            <Box className="w-4 h-4" />
+            <span className="hidden sm:inline">3D</span>
+          </button>
+          <button 
+            onClick={() => setActiveFolder(activeFolder === 'memory' ? null : 'memory')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              activeFolder === 'memory'
+                ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' 
+                : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white'
+            }`}
+          >
+            <Brain className="w-4 h-4" />
+            <span className="hidden sm:inline">Memory</span>
+          </button>
+          <button 
             onClick={() => setActiveFolder(activeFolder === 'settings' ? null : 'settings')}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
               activeFolder === 'settings'
@@ -1012,9 +1328,19 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
             <SlidersHorizontal className="w-4 h-4" />
             <span className="hidden sm:inline">Settings</span>
           </button>
-          <button onClick={onClose} className="text-zinc-400 hover:text-white transition-colors p-1">
-            <X className="w-6 h-6" />
-          </button>
+              <div className="flex items-center gap-2">
+                <select 
+                  value={selectedModel} 
+                  onChange={(e) => setSelectedModel(e.target.value as any)}
+                  className="bg-zinc-800 text-zinc-200 text-xs rounded-lg px-2 py-1 border border-zinc-700"
+                >
+                  <option value="gemini-3.1-pro-preview">Pro (Complex Tasks)</option>
+                  <option value="gemini-3-flash-preview">Flash (Fast Tasks)</option>
+                </select>
+                <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
         </div>
       </div>
 
@@ -1047,11 +1373,11 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
           {activeFolder === 'history' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 320, opacity: 1 }}
+              animate={{ width: '75vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
             >
-              <div className="p-4 flex flex-col gap-4 w-80">
+              <div className="p-4 flex flex-col gap-4 w-full">
                 <h2 className="text-lg font-semibold text-white">Chat History</h2>
                 {chatHistory.length === 0 ? (
                   <p className="text-sm text-zinc-500">No chat history yet.</p>
@@ -1076,7 +1402,7 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
           {activeFolder === 'map' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 600, opacity: 1 }}
+              animate={{ width: '75vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
             >
@@ -1090,7 +1416,7 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
           {activeFolder === 'book' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 600, opacity: 1 }}
+              animate={{ width: '75vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
             >
@@ -1104,11 +1430,11 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
           {activeFolder === 'video' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 320, opacity: 1 }}
+              animate={{ width: '75vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
             >
-              <div className="p-4 flex flex-col gap-4 w-80">
+              <div className="p-4 flex flex-col gap-4 w-full">
                 <h2 className="text-lg font-semibold text-white">Video Generation</h2>
                 <input 
                   type="text" 
@@ -1126,6 +1452,29 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
                 </button>
                 {videoUrl && (
                   <video src={videoUrl} controls className="w-full rounded-xl mt-2" />
+                )}
+                <div className="border-t border-zinc-700 my-2" />
+                <h2 className="text-lg font-semibold text-white">Embed YouTube</h2>
+                <input 
+                  type="text" 
+                  value={youtubeUrl} 
+                  onChange={(e) => setYoutubeUrl(e.target.value)}
+                  placeholder="Paste YouTube URL here..."
+                  className="w-full p-3 bg-zinc-800 text-white rounded-xl border border-zinc-700 focus:outline-none focus:border-indigo-500"
+                />
+                <button 
+                  onClick={handleYoutubeEmbed}
+                  className="w-full py-2.5 px-4 bg-zinc-700 hover:bg-zinc-600 text-white rounded-xl font-medium transition-colors"
+                >
+                  Embed YouTube
+                </button>
+                {embedUrl && (
+                  <iframe 
+                    src={embedUrl} 
+                    className="w-full h-64 rounded-xl mt-2" 
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                    allowFullScreen
+                  />
                 )}
               </div>
             </motion.div>
@@ -1154,16 +1503,133 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
           )}
         </AnimatePresence>
 
+        {/* Memory Panel */}
+        <AnimatePresence>
+          {activeFolder === 'memory' && (
+            <motion.div 
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: '75vw', opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+            >
+              <div className="p-4 flex flex-col gap-4 w-full">
+                <h2 className="text-lg font-semibold text-white">Import Memory</h2>
+                <button
+                  onClick={() => memoryFileInputRef.current?.click()}
+                  className="w-full py-2 bg-zinc-800 text-zinc-300 rounded-xl border border-zinc-700 hover:bg-zinc-700 hover:text-white transition-colors text-sm"
+                >
+                  Upload Memory File
+                </button>
+                <input
+                  type="file"
+                  ref={memoryFileInputRef}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (e) => {
+                        const text = e.target?.result as string;
+                        const newMemory = { id: Date.now().toString(), content: text };
+                        setMemories(prev => [...prev, newMemory]);
+                        localStorage.setItem('memories', JSON.stringify([...memories, newMemory]));
+                      };
+                      reader.readAsText(file);
+                    }
+                  }}
+                  className="hidden"
+                  accept=".txt,.md,.json"
+                />
+                
+                <div className="flex flex-col gap-2">
+                  {memories.map((m, index) => (
+                    <div key={m.id} className="flex gap-2">
+                      <textarea 
+                        value={m.content} 
+                        onChange={(e) => {
+                          const newMemories = [...memories];
+                          newMemories[index].content = e.target.value;
+                          setMemories(newMemories);
+                          localStorage.setItem('memories', JSON.stringify(newMemories));
+                        }}
+                        placeholder="Paste your memory here..."
+                        className="w-full h-24 p-3 bg-zinc-800 text-white rounded-xl border border-zinc-700 focus:outline-none focus:border-emerald-500 text-sm"
+                      />
+                      <button
+                        onClick={() => {
+                          const newMemories = memories.filter((_, i) => i !== index);
+                          setMemories(newMemories);
+                          localStorage.setItem('memories', JSON.stringify(newMemories));
+                        }}
+                        className="p-2 bg-red-900/20 text-red-400 rounded-xl hover:bg-red-900/40 transition-colors"
+                      >
+                        X
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => {
+                    const newMemory = { id: Date.now().toString(), content: '' };
+                    setMemories(prev => [...prev, newMemory]);
+                    localStorage.setItem('memories', JSON.stringify([...memories, newMemory]));
+                  }}
+                  className="w-full py-2 bg-zinc-700 text-white rounded-xl hover:bg-zinc-600 transition-colors text-sm font-semibold"
+                >
+                  + Add Memory
+                </button>
+                
+                <p className="text-xs text-zinc-500">These memories will be used to inform Mhiee's responses.</p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* 3D Panel */}
+        <AnimatePresence>
+          {activeFolder === '3d' && (
+            <motion.div 
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: '75vw', opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+            >
+              <div className="p-4 flex flex-col gap-4 w-full h-full">
+                <h2 className="text-lg font-semibold text-white">3D Visualization</h2>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={threePrompt} 
+                    onChange={(e) => setThreePrompt(e.target.value)}
+                    placeholder="Describe what to render..."
+                    className="flex-grow p-2 bg-zinc-800 text-white rounded-lg border border-zinc-700"
+                  />
+                  <button 
+                    onClick={() => setThreeKey(Date.now())}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500"
+                  >
+                    Render
+                  </button>
+                </div>
+                <div className="flex-grow w-full h-64 bg-zinc-800 rounded-xl overflow-hidden border border-zinc-700">
+                  <ThreeScene key={threeKey} prompt={threePrompt} />
+                </div>
+                <p className="text-xs text-zinc-500">Interactive 3D preview of generated content.</p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Settings Panel */}
         <AnimatePresence>
           {activeFolder === 'settings' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 320, opacity: 1 }}
+              animate={{ width: '75vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
             >
-              <div className="p-4 flex flex-col gap-6 w-80">
+              <div className="p-4 flex flex-col gap-6 w-full">
                 <h2 className="text-lg font-semibold text-white">Settings</h2>
                 
                 <div className="flex flex-col gap-2">
@@ -1231,6 +1697,45 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
                   </select>
                 </div>
 
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm text-zinc-400">Wake Word</label>
+                  <input 
+                    type="text"
+                    value={preferredWakeWord}
+                    onChange={(e) => {
+                      setPreferredWakeWord(e.target.value);
+                      localStorage.setItem('preferredWakeWord', e.target.value);
+                    }}
+                    className="p-2 bg-zinc-800 text-white rounded-lg border border-zinc-700"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-zinc-300">Wake Word Detection</span>
+                  <button 
+                    onClick={() => {
+                      const newValue = !isWakeWordEnabled;
+                      setIsWakeWordEnabled(newValue);
+                      localStorage.setItem('isWakeWordEnabled', newValue.toString());
+                    }}
+                    className={`w-10 h-5 rounded-full transition-colors ${isWakeWordEnabled ? 'bg-indigo-600' : 'bg-zinc-700'}`}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${isWakeWordEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                {isMicrophonePermissionDenied && (
+                  <div className="p-3 bg-red-900/20 border border-red-800 rounded-lg text-xs text-red-400">
+                    {microphoneErrorMessage}
+                    <button 
+                      onClick={startContinuousListening}
+                      className="block mt-2 text-indigo-400 hover:text-indigo-300 font-medium"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-zinc-300">Text Summarization</span>
                   <button 
@@ -1257,7 +1762,19 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
 
         {/* Chat Area */}
         <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
-          <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6">
+          <div 
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`flex-1 overflow-y-auto p-4 md:p-8 space-y-6 relative ${isDragging ? 'bg-indigo-950/20' : ''}`}
+          >
+            {isDragging && (
+              <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
+                <div className="bg-indigo-900/80 text-white p-6 rounded-2xl backdrop-blur-sm border border-indigo-500">
+                  <p className="text-lg font-semibold">Drop video here to upload</p>
+                </div>
+              </div>
+            )}
             {messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center">
                 <motion.div 
@@ -1285,10 +1802,10 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div 
-                    className={`max-w-[85%] rounded-2xl p-5 ${
+                    className={`max-w-[85%] rounded-3xl p-5 transition-all duration-200 hover:shadow-lg ${
                       msg.role === 'user' 
-                        ? 'bg-indigo-600 text-white rounded-tr-sm' 
-                        : 'bg-zinc-900 border border-zinc-800 text-zinc-100 rounded-tl-sm shadow-xl'
+                        ? 'bg-indigo-500 text-white rounded-br-none hover:bg-indigo-600' 
+                        : 'bg-zinc-800/50 backdrop-blur-sm border border-zinc-700/50 text-zinc-100 rounded-bl-none hover:bg-zinc-800/70'
                     }`}
                   >
                     {msg.role === 'user' ? (
@@ -1310,25 +1827,53 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
                       </div>
                     ) : (
                       <div className="flex flex-col relative">
-                        <div className="flex gap-2 mb-2">
-                          <button 
-                            onClick={() => readAloud(msg.text || '')}
-                            className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-md border border-zinc-700 shadow-sm transition-colors flex items-center gap-1"
-                            title="Read aloud"
-                          >
-                            <Volume2 className="w-3.5 h-3.5" />
-                            <span className="text-xs">Read</span>
-                          </button>
-                          <button 
-                            onClick={() => navigator.clipboard.writeText(msg.text)}
-                            className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-md border border-zinc-700 shadow-sm transition-colors"
-                            title="Copy to clipboard"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                          </button>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-indigo-400">
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>Mhiee</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => readAloud(msg.text || '')}
+                              className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-md border border-zinc-700 shadow-sm transition-colors flex items-center gap-1"
+                              title="Read aloud"
+                            >
+                              <Volume2 className="w-3.5 h-3.5" />
+                              <span className="text-xs">Read</span>
+                            </button>
+                            <button 
+                              onClick={() => navigator.clipboard.writeText(msg.text)}
+                              className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-md border border-zinc-700 shadow-sm transition-colors"
+                              title="Copy to clipboard"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                         <div className="markdown-body">
                           <Markdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{msg.text ? msg.text.replace(/```json\s*(\{[\s\S]*?"type":\s*"graph"[\s\S]*?\})\s*```/g, '').trim() : ''}</Markdown>
+                          {(() => {
+                            const quiz = parseQuiz(msg.text || '');
+                            if (quiz) {
+                              return (
+                                <div className="mt-4 flex flex-col gap-2">
+                                  <p className="font-semibold text-zinc-300">{quiz.question}</p>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {quiz.options.map(option => (
+                                      <button
+                                        key={option.label}
+                                        onClick={() => sendMessage(option.label)}
+                                        className="p-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg border border-zinc-700 transition-colors text-sm"
+                                      >
+                                        {option.label}: {option.text}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                           {msg.groundingMetadata && msg.groundingMetadata.groundingChunks && (
                             <div className="mt-4 p-4 bg-zinc-800 rounded-lg">
                               <h4 className="text-sm font-semibold text-zinc-300 mb-2">Sources:</h4>
@@ -1458,50 +2003,84 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
               </div>
             )}
             <form onSubmit={handleSend} className="relative flex items-end gap-2 bg-zinc-900 border border-zinc-800 rounded-2xl p-2 focus-within:border-indigo-500/50 transition-colors shadow-lg">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="p-3 text-zinc-400 hover:text-indigo-400 transition-colors mb-0.5"
-                title="Upload Images"
-              >
-                <ImagePlus className="w-5 h-5" />
-              </button>
-              <button
-                type="button"
-                onClick={startCamera}
-                className="p-3 text-zinc-400 hover:text-indigo-400 transition-colors mb-0.5"
-                title="Take Photo"
-              >
-                <Camera className="w-5 h-5" />
-              </button>
-              <input
-                type="file"
-                multiple
-                ref={fileInputRef}
-                onChange={handleImageUpload}
-                accept="image/*"
-                className="hidden"
+              <div className="flex items-center gap-2 bg-zinc-800/50 border border-zinc-700/50 rounded-2xl p-2 focus-within:border-indigo-500/50 transition-all w-full">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-2 text-zinc-400 hover:text-indigo-400 transition-colors"
+                  title="Upload Images"
+                >
+                  <ImagePlus className="w-5 h-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={startCamera}
+                  className="p-2 text-zinc-400 hover:text-indigo-400 transition-colors"
+                  title="Take Photo"
+                >
+                  <Camera className="w-5 h-5" />
+                </button>
+                <input
+                  type="file"
+                  multiple
+                  ref={fileInputRef}
+                  onChange={handleImageUpload}
+                  accept="image/*"
+                  className="hidden"
+                />
+                <textarea 
+                  value={input}
+                  onChange={e => {
+                    setInput(e.target.value);
+                    e.target.style.height = 'auto';
+                    e.target.style.height = `${e.target.scrollHeight}px`;
+                  }}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Ask Mhiee anything..."
+                  className="flex-1 bg-transparent border-none focus:ring-0 text-zinc-100 placeholder-zinc-500 p-2 resize-none max-h-32"
+                  rows={1}
+                />
+                <button
+                  type="submit"
+                  disabled={isTyping || (!input.trim() && selectedImages.length === 0)}
+                  className="p-2 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 transition-colors disabled:opacity-50"
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
+              <VoiceChat 
+                onToggle={(active) => {}}
+                onStartCamera={startCamera}
+                onStopCamera={stopCamera}
+                onClearChat={() => setMessages([])}
               />
-              <textarea 
-                value={input}
-                onChange={e => {
-                  setInput(e.target.value);
-                  e.target.style.height = 'auto';
-                  e.target.style.height = `${e.target.scrollHeight}px`;
+              <button
+                onClick={async () => {
+                  if (isContinuousListening) {
+                    stopContinuousListening();
+                  } else {
+                    await startContinuousListening(true);
+                    setIsAwake(true);
+                  }
                 }}
-                onKeyDown={handleKeyDown}
-                placeholder="Ask Mhiee anything in any language (e.g., Hausa)..."
-                className="flex-1 bg-transparent border-none resize-none max-h-48 min-h-[44px] py-3 px-2 text-sm focus:outline-none text-white placeholder-zinc-500"
-                rows={1}
-                style={{ height: 'auto' }}
-              />
-              <VoiceChat onToggle={(active) => console.log('Voice chat active:', active)} />
+                className={`p-2.5 rounded-xl transition-all ${isContinuousListening ? 'bg-blue-500 text-white animate-pulse' : 'bg-zinc-800 text-blue-500 hover:bg-blue-500 hover:text-white'}`}
+              >
+                {isContinuousListening ? 'Stop Mhiee' : 'Wake Mhiee'}
+              </button>
+              <button
+                type="button"
+                onClick={toggleListening}
+                className={`p-3 rounded-xl transition-colors ${isListening ? 'bg-green-500 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
+                title="Toggle Voice Commands"
+              >
+                <Mic className="w-5 h-5" />
+              </button>
               <button
                 type="button"
                 onClick={isRecording ? stopRecording : startRecording}
                 className={`p-3 rounded-xl transition-colors ${isRecording ? 'bg-red-500 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
               >
-                <Mic className="w-5 h-5" />
+                <Volume2 className="w-5 h-5" />
               </button>
               <button 
                 type="submit" 

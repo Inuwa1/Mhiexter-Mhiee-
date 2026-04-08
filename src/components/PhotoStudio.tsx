@@ -4,6 +4,7 @@ import ReactCrop, { type Crop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from '@google/genai';
+import { callAiWithRetry } from '../lib/aiUtils';
 
 // const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -106,7 +107,7 @@ export default function PhotoStudio() {
       
       if (!match1 || !match2) throw new Error("Invalid image format");
 
-      const response = await ai.models.generateContent({
+      const response = await callAiWithRetry(() => ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: {
           parts: [
@@ -115,7 +116,7 @@ export default function PhotoStudio() {
             { text: "Replace the face of the person in the first image with the face from the second image seamlessly. IMPORTANT: Do not decompose, alter, or touch the face of the person in the image. Ensure the editing looks completely natural and not like AI editing." }
           ]
         }
-      });
+      }));
 
       let newImage = null;
       let textResponse = null;
@@ -209,28 +210,15 @@ export default function PhotoStudio() {
       const mimeType = match[1];
       const base64Data = match[2];
 
-      let response;
-      let retries = 0;
-      const maxRetries = 3;
-
-      while (retries < maxRetries) {
-        try {
-          response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: {
-              parts: [
-                { inlineData: { mimeType, data: base64Data } },
-                { text: finalPrompt }
-              ]
-            }
-          });
-          break;
-        } catch (err: any) {
-          retries++;
-          if (retries >= maxRetries) throw err;
-          await new Promise(resolve => setTimeout(resolve, 1000 * retries)); // Exponential backoff
+      const response = await callAiWithRetry(() => ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: {
+          parts: [
+            { inlineData: { mimeType, data: base64Data } },
+            { text: finalPrompt }
+          ]
         }
-      }
+      }));
 
       let newImage = null;
       let textResponse = null;

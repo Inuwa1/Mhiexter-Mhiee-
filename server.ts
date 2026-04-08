@@ -1,4 +1,5 @@
 import express from "express";
+import 'dotenv/config';
 import { createServer as createViteServer } from "vite";
 import { Server } from "socket.io";
 import http from "http";
@@ -17,6 +18,23 @@ async function startServer() {
   });
 
   const PORT = 3000;
+
+  // API route for configuration
+  app.get("/api/config", (req, res) => {
+    console.log("Received request for /api/config");
+    const key = process.env.GEMINI_API_KEY;
+    console.log("API Key requested. Key exists:", !!key);
+    
+    // Fallback check for process.env if dotenv didn't load it
+    const finalKey = key || process.env.GEMINI_API_KEY;
+    
+    if (!finalKey) {
+      console.error("GEMINI_API_KEY is missing in the server environment!");
+    }
+    res.json({
+      GEMINI_API_KEY: finalKey || "MISSING_KEY",
+    });
+  });
 
   // WebRTC Signaling Logic
   io.on("connection", (socket) => {
@@ -74,6 +92,7 @@ async function startServer() {
 
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log("GEMINI_API_KEY available:", !!process.env.GEMINI_API_KEY);
   });
 }
 

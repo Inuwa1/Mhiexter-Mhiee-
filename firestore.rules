@@ -1,32 +1,52 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (matches auth.uid)
+    // Fields:
+    //   - uid: string (required, immutable) - The Firebase Auth UID.
+    //   - email: string (required, immutable) - The user's email address.
+    //   - displayName: string (optional, mutable) - The user's display name.
+    //
+    // ===============================================================
+
+    // ===============================================================
     // Helper Functions
+    // ===============================================================
+
     function isAuthenticated() {
       return request.auth != null;
     }
+
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
-    function hasRequiredFields(fields) {
-      return request.resource.data.keys().hasAll(fields);
-    }
+
     function hasOnlyAllowedFields(fields) {
       return request.resource.data.keys().hasOnly(fields);
     }
-    function isValidUserFace() {
-      return hasRequiredFields(['uid', 'faceImage', 'createdAt']) &&
-             hasOnlyAllowedFields(['uid', 'faceImage', 'createdAt']) &&
-             request.resource.data.uid is string &&
-             request.resource.data.faceImage is string && request.resource.data.faceImage.size() < 1000000 &&
-             request.resource.data.createdAt is string;
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName']) &&
+             data.uid is string && data.uid.size() > 0 &&
+             data.email is string && data.email.size() > 0 &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100));
     }
 
-    match /users/{userId}/faces/{faceId} {
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidUserFace() && request.resource.data.uid == userId;
-      allow update: if isOwner(userId) && isValidUserFace() && request.resource.data.uid == userId;
-      allow delete: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.uid == request.auth.uid;
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.uid == resource.data.uid;
     }
   }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "Mhiexter Mhiee 🫰",
-  "description": "A simple video player application with a built-in unified AI browser.",
-  "requestFramePermissions": ["camera", "microphone", "geolocation"]
+  "name": "Mhiee AI Studio",
+  "description": "A comprehensive AI-powered photo & video editing studio.",
+  "requestFramePermissions": ["camera", "microphone"]
 }

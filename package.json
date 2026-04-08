@@ -33,12 +33,14 @@
     "remark-math": "^6.0.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
+    "three": "^0.183.2",
     "vite": "^6.2.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.25",
     "@types/google.maps": "^3.58.1",
     "@types/node": "^22.14.0",
+    "@types/three": "^0.183.1",
     "autoprefixer": "^10.4.21",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",

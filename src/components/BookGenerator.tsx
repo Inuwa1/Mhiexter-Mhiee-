@@ -1,29 +1,39 @@
-import React, { useState } from 'react';
-import { PDFDownloadLink, Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer';
-import { GoogleGenAI, Type } from '@google/genai';
-import { Loader2, Download, BookOpen, Bold, Type as TypeIcon, Image as ImageIcon, Palette, Calculator } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { PDFDownloadLink, Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
+import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
+import { streamAiWithRetry, callAiWithRetry } from '../lib/aiUtils';
+import { Loader2, Download, BookOpen, History, Plus } from 'lucide-react';
+
+// Define types for the new structure
+interface Chapter {
+  title: string;
+  content: string;
+  status: 'pending' | 'generating' | 'done';
+}
+
+interface Book {
+  id: string;
+  title: string;
+  chapters: Chapter[];
+  font: string;
+  titleUppercase: boolean;
+}
 
 const styles = StyleSheet.create({
   page: { padding: 30 },
   title: { fontSize: 24, marginBottom: 20, textAlign: 'center' },
   chapterTitle: { fontSize: 18, marginTop: 15, marginBottom: 10 },
   paragraph: { fontSize: 12, marginBottom: 10, lineHeight: 1.5 },
-  image: { width: '100%', marginBottom: 10 },
 });
 
-const PDFDocument = ({ title, content }: { title: string, content: any }) => (
+const PDFDocument = ({ book }: { book: Book }) => (
   <Document>
-    <Page size="A4" style={[styles.page, { fontFamily: content.font }]}>
-      <Text style={[styles.title, { textTransform: content.titleUppercase ? 'uppercase' : 'none' }]}>{title}</Text>
-      {content.chapters.map((chapter: any, index: number) => (
+    <Page size="A4" style={[styles.page, { fontFamily: book.font }]}>
+      <Text style={[styles.title, { textTransform: book.titleUppercase ? 'uppercase' : 'none' }]}>{book.title}</Text>
+      {book.chapters.map((chapter, index) => (
         <View key={index}>
           <Text style={styles.chapterTitle}>{index + 1}. {chapter.title}</Text>
-          {chapter.paragraphs.map((p: any, pIndex: number) => (
-            <View key={pIndex}>
-              {p.photoUrl && <Image src={p.photoUrl} style={styles.image} />}
-              <Text style={[styles.paragraph, { color: p.color, fontWeight: p.bold ? 'bold' : 'normal', textTransform: p.uppercase ? 'uppercase' : 'none' }]}>{p.text}</Text>
-            </View>
-          ))}
+          <Text style={styles.paragraph}>{chapter.content}</Text>
         </View>
       ))}
     </Page>
@@ -32,134 +42,147 @@ const PDFDocument = ({ title, content }: { title: string, content: any }) => (
 
 export default function BookGenerator() {
   const [topic, setTopic] = useState('');
-  const [bookData, setBookData] = useState<any>(null);
+  const [currentBook, setCurrentBook] = useState<Book | null>(null);
+  const [history, setHistory] = useState<Book[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [problem, setProblem] = useState('');
-  const [isSolving, setIsSolving] = useState(false);
-  const [stylingSuggestions, setStylingSuggestions] = useState<any>(null);
+  const [selectedChapters, setSelectedChapters] = useState<number[]>([]);
 
-  const generateBook = async () => {
+  useEffect(() => {
+    const savedHistory = localStorage.getItem('bookHistory');
+    if (savedHistory) setHistory(JSON.parse(savedHistory));
+  }, []);
+
+  const saveToHistory = (book: Book) => {
+    const newHistory = [book, ...history.filter(h => h.id !== book.id)];
+    setHistory(newHistory);
+    localStorage.setItem('bookHistory', JSON.stringify(newHistory));
+  };
+
+  const generateOutline = async () => {
     if (!topic) return;
     setIsGenerating(true);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
+      const response = await callAiWithRetry(() => ai.models.generateContent({
         model: 'gemini-3.1-pro-preview',
-        contents: `Write a book about: ${topic}. Include title, 3 chapters, 3 paragraphs each. If the topic is related to calculations (math, physics, chemistry), include a chapter titled 'Practice Problems' with many simple and tricky questions and answers, solved step-by-step with detailed explanations for every move and formula derivation. Also suggest styling options (font: Helvetica, Times-Roman, or Courier; titleUppercase: true or false). Return JSON with book content and stylingSuggestions.`,
+        contents: `Create an outline for a comprehensive, long-form book about: ${topic}. Include a title and a list of 20 detailed chapter titles. Return JSON with title and chapterTitles (array of strings).`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
             properties: {
               title: { type: Type.STRING },
-              chapters: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING },
-                    paragraphs: { type: Type.ARRAY, items: { type: Type.STRING } }
-                  },
-                  required: ["title", "paragraphs"]
-                }
-              },
-              stylingSuggestions: {
-                type: Type.OBJECT,
-                properties: {
-                  font: { type: Type.STRING },
-                  titleUppercase: { type: Type.BOOLEAN }
-                }
-              }
+              chapterTitles: { type: Type.ARRAY, items: { type: Type.STRING } }
             },
-            required: ["title", "chapters", "stylingSuggestions"]
+            required: ["title", "chapterTitles"]
           }
         }
-      });
+      }));
       const data = JSON.parse(response.text!);
-      setBookData({
-        ...data,
+      const newBook: Book = {
+        id: Date.now().toString(),
+        title: data.title,
+        chapters: data.chapterTitles.map((title: string) => ({ title, content: '', status: 'pending' })),
         font: 'Helvetica',
-        titleUppercase: false,
-        chapters: data.chapters.map((c: any) => ({
-          ...c,
-          paragraphs: c.paragraphs.map((p: string) => ({ text: p, bold: false, uppercase: false, photoUrl: '', color: 'black' }))
-        }))
-      });
-      setStylingSuggestions(data.stylingSuggestions);
+        titleUppercase: false
+      };
+      setCurrentBook(newBook);
+      saveToHistory(newBook);
+      setSelectedChapters([]);
     } catch (error) { console.error(error); } finally { setIsGenerating(false); }
   };
 
-  const solveProblem = async () => {
-    if (!problem || !bookData) return;
-    setIsSolving(true);
+  const generateChapter = async (index: number, book: Book): Promise<Book> => {
+    const newBook = { ...book };
+    newBook.chapters[index].status = 'generating';
+    newBook.chapters[index].content = '';
+    setCurrentBook(newBook);
+
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
+      const stream = await streamAiWithRetry(async () => ai.models.generateContentStream({
         model: 'gemini-3.1-pro-preview',
-        contents: `Solve this problem step-by-step: ${problem}. Make it very easy to understand. Return as a single string of text.`,
-      });
-      const solution = response.text!;
-      const newData = {...bookData};
-      newData.chapters[0].paragraphs.push({ text: `Solved Problem: ${problem}\n\n${solution}`, bold: false, uppercase: false, photoUrl: '', color: 'black' });
-      setBookData(newData);
-    } catch (error) { console.error(error); } finally { setIsSolving(false); }
+        contents: `Write a very detailed, long chapter for the book "${newBook.title}". Chapter title: "${newBook.chapters[index].title}". Provide at least 5000 words for this chapter.`,
+        config: { thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } }
+      }));
+      
+      let fullContent = '';
+      for await (const chunk of stream) {
+        fullContent += chunk.text;
+        newBook.chapters[index].content = fullContent;
+        setCurrentBook({ ...newBook });
+      }
+      
+      newBook.chapters[index].status = 'done';
+    } catch (error) { 
+      console.error(error); 
+      newBook.chapters[index].status = 'pending'; 
+    }
+    setCurrentBook(newBook);
+    saveToHistory(newBook);
+    return newBook;
+  };
+
+  const generateSelectedChapters = async () => {
+    if (!currentBook) return;
+    let book = { ...currentBook };
+    for (const index of selectedChapters) {
+      book = await generateChapter(index, book);
+    }
+    setSelectedChapters([]);
+  };
+
+  const toggleChapterSelection = (index: number) => {
+    setSelectedChapters(prev => 
+      prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+    );
   };
 
   return (
-    <div className="p-6 bg-zinc-900 text-zinc-100 rounded-xl h-full overflow-y-auto">
-      <h2 className="text-2xl font-bold mb-4">Book Generator</h2>
-      <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Enter book topic..." className="w-full p-3 bg-zinc-800 rounded-lg mb-4" />
-      <button onClick={generateBook} className="px-4 py-2 bg-indigo-600 rounded-lg flex items-center gap-2">
-        {isGenerating ? <Loader2 className="animate-spin" /> : <BookOpen />} Generate Book
-      </button>
-
-      {stylingSuggestions && (
-        <div className="mt-4 p-4 bg-zinc-800 rounded-lg">
-          <h4 className="font-bold">AI Styling Suggestions:</h4>
-          <p>Font: {stylingSuggestions.font}, Uppercase Title: {stylingSuggestions.titleUppercase ? 'Yes' : 'No'}</p>
-          <button onClick={() => setBookData({...bookData, font: stylingSuggestions.font, titleUppercase: stylingSuggestions.titleUppercase})} className="mt-2 px-2 py-1 bg-emerald-600 rounded">Apply Suggestions</button>
-        </div>
-      )}
-
-      {bookData && (
-        <div className="mt-6">
-          <div className="mb-4 p-4 bg-zinc-800 rounded-lg">
-            <h4 className="font-bold mb-2">Solve Problem:</h4>
-            <input value={problem} onChange={(e) => setProblem(e.target.value)} placeholder="Enter math/physics/chem problem..." className="w-full p-2 bg-zinc-700 rounded mb-2" />
-            <button onClick={solveProblem} className="px-4 py-2 bg-amber-600 rounded-lg flex items-center gap-2">
-              {isSolving ? <Loader2 className="animate-spin" /> : <Calculator />} Solve Step-by-Step
-            </button>
+    <div className="p-6 bg-zinc-900 text-zinc-100 rounded-xl h-full overflow-y-auto flex gap-6">
+      <div className="w-1/3 border-r border-zinc-700 pr-4">
+        <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><History /> History</h3>
+        {history.map(book => (
+          <div key={book.id} onClick={() => setCurrentBook(book)} className="p-2 bg-zinc-800 rounded mb-2 cursor-pointer hover:bg-zinc-700">
+            {book.title}
           </div>
+        ))}
+      </div>
+      <div className="flex-1">
+        <h2 className="text-2xl font-bold mb-4">Book Generator</h2>
+        <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Enter book topic..." className="w-full p-3 bg-zinc-800 rounded-lg mb-4" />
+        <button onClick={generateOutline} className="px-4 py-2 bg-indigo-600 rounded-lg flex items-center gap-2 mb-6">
+          {isGenerating ? <Loader2 className="animate-spin" /> : <Plus />} Generate Outline
+        </button>
 
-          <select value={bookData.font} onChange={(e) => setBookData({...bookData, font: e.target.value})} className="bg-zinc-800 p-2 rounded mb-2">
-            <option value="Helvetica">Helvetica</option>
-            <option value="Times-Roman">Times-Roman</option>
-            <option value="Courier">Courier</option>
-          </select>
-          <h3 className="text-xl font-semibold">{bookData.title}</h3>
-          {bookData.chapters.map((chapter: any, cIndex: number) => (
-            <div key={cIndex} className="mt-4 border-t border-zinc-700 pt-4">
-              <input value={chapter.title} onChange={(e) => { const newData = {...bookData}; newData.chapters[cIndex].title = e.target.value; setBookData(newData); }} className="text-lg font-bold bg-zinc-800 w-full p-2 rounded" />
-              {chapter.paragraphs.map((p: any, pIndex: number) => (
-                <div key={pIndex} className="mt-2 p-2 bg-zinc-800 rounded">
-                  <textarea value={p.text} onChange={(e) => { const newData = {...bookData}; newData.chapters[cIndex].paragraphs[pIndex].text = e.target.value; setBookData(newData); }} className="w-full bg-transparent" />
-                  <div className="flex gap-2 mt-1 items-center">
-                    <button onClick={() => { const newData = {...bookData}; newData.chapters[cIndex].paragraphs[pIndex].bold = !p.bold; setBookData(newData); }} className={`p-1 ${p.bold ? 'bg-indigo-600' : 'bg-zinc-700'} rounded`}><Bold size={16}/></button>
-                    <button onClick={() => { const newData = {...bookData}; newData.chapters[cIndex].paragraphs[pIndex].uppercase = !p.uppercase; setBookData(newData); }} className={`p-1 ${p.uppercase ? 'bg-indigo-600' : 'bg-zinc-700'} rounded`}><TypeIcon size={16}/></button>
-                    <button onClick={() => { const newData = {...bookData}; newData.chapters[cIndex].paragraphs[pIndex].color = 'black'; setBookData(newData); }} className="p-1 bg-black rounded border border-zinc-600" title="Black" />
-                    <button onClick={() => { const newData = {...bookData}; newData.chapters[cIndex].paragraphs[pIndex].color = 'red'; setBookData(newData); }} className="p-1 bg-red-600 rounded" title="Red" />
-                    <button onClick={() => { const newData = {...bookData}; newData.chapters[cIndex].paragraphs[pIndex].color = 'green'; setBookData(newData); }} className="p-1 bg-green-600 rounded" title="Green" />
-                    <input placeholder="Photo URL" value={p.photoUrl} onChange={(e) => { const newData = {...bookData}; newData.chapters[cIndex].paragraphs[pIndex].photoUrl = e.target.value; setBookData(newData); }} className="bg-zinc-700 p-1 rounded text-xs flex-1" />
+        {currentBook && (
+          <div>
+            <h3 className="text-2xl font-semibold mb-4">{currentBook.title}</h3>
+            {currentBook.chapters.map((chapter, index) => (
+              <div key={index} className="mb-4 p-4 bg-zinc-800 rounded-lg flex items-center gap-4">
+                <input type="checkbox" checked={selectedChapters.includes(index)} onChange={() => toggleChapterSelection(index)} className="w-5 h-5" />
+                <div className="flex-1">
+                  <h4 className="font-bold">{chapter.title}</h4>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button onClick={() => generateChapter(index, currentBook)} disabled={chapter.status === 'generating'} className="px-3 py-1 bg-emerald-600 rounded text-sm">
+                      {chapter.status === 'generating' ? 'Generating...' : chapter.status === 'done' ? 'Regenerate' : 'Generate Content'}
+                    </button>
+                    {chapter.status === 'done' && <span className="text-emerald-400 text-sm">Done</span>}
                   </div>
                 </div>
-              ))}
+              </div>
+            ))}
+            <div className="flex gap-4">
+              <button onClick={generateSelectedChapters} disabled={selectedChapters.length === 0 || isGenerating} className="px-4 py-2 bg-blue-600 rounded-lg flex items-center gap-2">
+                <BookOpen /> Generate Selected ({selectedChapters.length})
+              </button>
+              <PDFDownloadLink document={<PDFDocument book={currentBook} />} fileName={`${currentBook.title}.pdf`} className="px-4 py-2 bg-green-600 rounded-lg flex items-center gap-2">
+                {({ blob, url, loading, error }) => (loading ? 'Loading document...' : <><Download /> Download PDF</>)}
+              </PDFDownloadLink>
             </div>
-          ))}
-          <PDFDownloadLink document={<PDFDocument title={bookData.title} content={bookData} />} fileName="book.pdf" className="mt-6 px-4 py-2 bg-green-600 rounded-lg flex items-center gap-2">
-            {({ blob, url, loading, error }) => (loading ? 'Loading document...' : <><Download /> Download PDF</>)}
-          </PDFDownloadLink>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

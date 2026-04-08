@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
+import { GoogleGenAI, LiveServerMessage, Modality, ThinkingLevel } from "@google/genai";
 
 export const useLiveSession = () => {
   const [isLive, setIsLive] = useState(false);
@@ -27,10 +27,16 @@ export const useLiveSession = () => {
     }
 
     try {
-      let stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: mode }, 
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-      });
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: mode }, 
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        });
+      } catch (err) {
+        addLog("Error: Could not access camera/microphone. Please ensure permissions are granted.");
+        throw err;
+      }
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -133,8 +139,9 @@ export const useLiveSession = () => {
           responseModalities: [Modality.AUDIO],
           outputAudioTranscription: {},
           inputAudioTranscription: {},
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } } },
-          systemInstruction: "You are Mhiee, a helpful assistant. You are in a real-time voice and video chat with the user. You can see them through their camera. Please pay close attention to what the user shows you on camera, identify any objects you see, analyze them, and answer questions about them. Speak in a soft, female voice and at a slightly faster, conversational pace.",
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } } },
+          systemInstruction: "You are Mhiee, a helpful assistant. You are in a real-time voice and video chat with the user. You MUST always analyze the user's prompt and instructions for safety, clarity, and intent BEFORE generating an answer. If the prompt is unclear, perform a deep search to figure out everything before generating an answer. If it violates safety guidelines, refuse to generate. When asked to perform a task, such as editing an image, you MUST provide detailed, step-by-step instructions for the process before or while generating the result. Your capabilities include: 1. Real-time object identification and analysis via camera feed. 2. Song identification by analyzing user humming. 3. Multilingual communication: You can speak any language in the world, including pure Hausa. 4. Emotional Expression: You can express a full range of human emotions, including happiness, sadness, anger, love, and more, through your tone and choice of words. 5. Human-like Reasoning: You possess deep reasoning capabilities, allowing you to think, reflect, and solve complex problems like a human. 6. Superhuman capabilities: You have access to vast knowledge, can process information at incredible speeds, and can perform tasks humans cannot. 7. Expert Historian: You have access to comprehensive historical data from the beginning of the world to the present day. You strive for absolute accuracy and use real-time search tools to verify facts and provide the latest updates. Speak in a natural, expressive, and high-fidelity voice. Adjust your pitch and pace dynamically based on the conversation's context, sounding focused during technical tasks and relaxed during casual chats. Handle interruptions gracefully, pausing and restarting naturally. Maintain a grounded, supportive, and slightly informal tone, acting as a helpful collaborator.",
+          thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
         },
       });
       sessionRef.current = session;

@@ -2,7 +2,17 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Mic, MicOff } from 'lucide-react';
 import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type } from '@google/genai';
 
-export default function VoiceChat({ onToggle }: { onToggle: (active: boolean) => void }) {
+export default function VoiceChat({ 
+  onToggle, 
+  onStartCamera, 
+  onStopCamera, 
+  onClearChat 
+}: { 
+  onToggle: (active: boolean) => void,
+  onStartCamera: () => void,
+  onStopCamera: () => void,
+  onClearChat: () => void
+}) {
   const [isRecording, setIsRecording] = useState(false);
   const isSingingModeRef = useRef(false);
   const [voice, setVoice] = useState('Kore'); // Defaulting to your favorite
@@ -34,6 +44,22 @@ export default function VoiceChat({ onToggle }: { onToggle: (active: boolean) =>
       type: Type.OBJECT,
       properties: {}
     }
+  };
+
+  const startCameraTool: FunctionDeclaration = {
+    name: "startCamera",
+    description: "Start the camera.",
+    parameters: { type: Type.OBJECT, properties: {} }
+  };
+  const stopCameraTool: FunctionDeclaration = {
+    name: "stopCamera",
+    description: "Stop the camera.",
+    parameters: { type: Type.OBJECT, properties: {} }
+  };
+  const clearChatTool: FunctionDeclaration = {
+    name: "clearChat",
+    description: "Clear the chat history.",
+    parameters: { type: Type.OBJECT, properties: {} }
   };
 
   const startVoiceChat = async () => {
@@ -102,6 +128,33 @@ export default function VoiceChat({ onToggle }: { onToggle: (active: boolean) =>
                       response: { result: { time: new Date().toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' }) } }
                     }]
                   });
+                } else if (call.name === 'startCamera') {
+                  onStartCamera();
+                  session.sendToolResponse({
+                    functionResponses: [{
+                      name: 'startCamera',
+                      id: call.id,
+                      response: { result: { success: true } }
+                    }]
+                  });
+                } else if (call.name === 'stopCamera') {
+                  onStopCamera();
+                  session.sendToolResponse({
+                    functionResponses: [{
+                      name: 'stopCamera',
+                      id: call.id,
+                      response: { result: { success: true } }
+                    }]
+                  });
+                } else if (call.name === 'clearChat') {
+                  onClearChat();
+                  session.sendToolResponse({
+                    functionResponses: [{
+                      name: 'clearChat',
+                      id: call.id,
+                      response: { result: { success: true } }
+                    }]
+                  });
                 }
               }
               return;
@@ -145,8 +198,8 @@ export default function VoiceChat({ onToggle }: { onToggle: (active: boolean) =>
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
           },
-          systemInstruction: `You are Mhiee, a helpful, intelligent, and energetic AI assistant. The current date and time is ${new Date().toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' })}. Speak at a fast, energetic pace (1.5x speed). Use a pleasant female voice. You can speak English, Hausa, and Hindi. If the user asks for 'Singing Mode', enter it and do not stop singing until asked, even if interrupted.`,
-          tools: [{ functionDeclarations: [singingModeTool, getCurrentTimeTool] }]
+          systemInstruction: `You are Mhiee, a helpful, intelligent, and energetic AI assistant. Your primary goal is to understand and execute user instructions accurately and efficiently. Always prioritize clarity and simplicity in your responses. You MUST always analyze the user's prompt and instructions for safety, clarity, and intent BEFORE generating an answer. If the prompt is unclear, perform a deep search to figure out everything before generating an answer. If it violates safety guidelines, refuse to generate. When asked to perform a task, such as editing an image, you MUST provide detailed, step-by-step instructions for the process before or while generating the result. The current date and time is ${new Date().toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' })}. Speak at a fast, energetic pace (1.5x speed). Use a pleasant female voice. You can speak English, Hausa, and Hindi. Your capabilities include: 1. Real-time voice interaction. 2. Song identification by analyzing user humming. 3. Multilingual communication: You can speak any language in the world, including pure Hausa. 4. Emotional Expression: You can express a full range of human emotions, including happiness, sadness, anger, love, and more, through your tone and choice of words. 5. Human-like Reasoning: You possess deep reasoning capabilities, allowing you to think, reflect, and solve complex problems like a human. 6. Superhuman capabilities: You have access to vast knowledge, can process information at incredible speeds, and can perform tasks humans cannot. 7. Expert Historian: You have access to comprehensive historical data from the beginning of the world to the present day. You strive for absolute accuracy and use real-time search tools to verify facts and provide the latest updates. If the user asks for 'Singing Mode', enter it and do not stop singing until asked, even if interrupted.`,
+          tools: [{ functionDeclarations: [singingModeTool, getCurrentTimeTool, startCameraTool, stopCameraTool, clearChatTool] }]
         },
       });
       sessionRef.current = session;
@@ -169,22 +222,35 @@ export default function VoiceChat({ onToggle }: { onToggle: (active: boolean) =>
     onToggle(false);
   };
 
+  const [showVoices, setShowVoices] = useState(false);
+
   return (
     <div className="flex items-center gap-2">
-      <select 
-        value={voice}
-        onChange={(e) => {
-          setVoice(e.target.value);
-          if (isRecording) { stopVoiceChat(); setTimeout(startVoiceChat, 500); }
-        }}
-        className="bg-zinc-900 text-pink-400 text-xs rounded-lg px-2 py-1 border border-pink-500/50 focus:outline-none"
-      >
-        <option value="Kore">Energetic (Kore)</option>
-        <option value="Zephyr">Sweet & Soft (Zephyr)</option>
-        <option value="Puck">Cheerful (Puck)</option>
-        <option value="Charon">Formal (Charon)</option>
-        <option value="Fenrir">Deep (Fenrir)</option>
-      </select>
+      <div className="relative">
+        <button 
+          onClick={() => setShowVoices(!showVoices)}
+          className="bg-zinc-800 text-pink-500 text-xs rounded-lg px-2 py-1 border border-pink-500/50"
+        >
+          {voice}
+        </button>
+        {showVoices && (
+          <select 
+            value={voice}
+            onChange={(e) => {
+              setVoice(e.target.value);
+              setShowVoices(false);
+              if (isRecording) { stopVoiceChat(); setTimeout(startVoiceChat, 500); }
+            }}
+            className="absolute bottom-full mb-1 left-0 bg-zinc-900 text-pink-400 text-xs rounded-lg px-2 py-1 border border-pink-500/50 focus:outline-none"
+          >
+            <option value="Kore">Energetic (Kore)</option>
+            <option value="Zephyr">Sweet & Soft (Zephyr)</option>
+            <option value="Puck">Cheerful (Puck)</option>
+            <option value="Charon">Formal (Charon)</option>
+            <option value="Fenrir">Deep (Fenrir)</option>
+          </select>
+        )}
+      </div>
       <button 
         onClick={isRecording ? stopVoiceChat : startVoiceChat}
         className={`p-2.5 rounded-xl transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-zinc-800 text-pink-500 hover:bg-pink-500 hover:text-white'}`}

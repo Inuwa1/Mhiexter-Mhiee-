@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import ThreeScene from './ThreeScene';
 import MhiexterBrowser from './MhiexterBrowser';
 import VoiceChat from './VoiceChat';
-import MapPanel from './MapPanel';
 import BookGenerator from './BookGenerator';
 import GraphRenderer from './GraphRenderer';
 import LiveSession from './LiveSession';
@@ -68,10 +67,6 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
   const [showHelp, setShowHelp] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isContinuousListening, setIsContinuousListening] = useState(false);
-  const continuousMediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const continuousStreamRef = useRef<MediaStream | null>(null);
-  const socketRef = useRef<WebSocket | null>(null);
-
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -122,74 +117,9 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const startContinuousListening = async (force: boolean = false) => {
-    console.log("startContinuousListening called, isWakeWordEnabled:", isWakeWordEnabled, "force:", force);
-    if (!isWakeWordEnabled && !force) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      continuousStreamRef.current = stream;
-      setIsMicrophonePermissionDenied(false);
-      setMicrophoneErrorMessage("");
-      
-      // WARNING: This is a client-side demo. In production, route through a secure backend proxy.
-      socketRef.current = new WebSocket('wss://api.deepgram.com/v1/listen?detect_language=true', [
-        'token',
-        import.meta.env.VITE_DEEPGRAM_API_KEY
-      ]);
-
-      socketRef.current.onopen = () => {
-        console.log("Deepgram WebSocket connected.");
-        setIsContinuousListening(true);
-        
-        continuousMediaRecorderRef.current = new MediaRecorder(stream);
-        continuousMediaRecorderRef.current.addEventListener('dataavailable', (event) => {
-          if (event.data.size > 0 && socketRef.current?.readyState === 1) {
-            socketRef.current.send(event.data);
-          }
-        });
-        continuousMediaRecorderRef.current.addEventListener('stop', () => {
-          console.log("MediaRecorder stopped");
-          continuousStreamRef.current?.getTracks().forEach(track => track.stop());
-          continuousStreamRef.current = null;
-        });
-        continuousMediaRecorderRef.current.start(250); 
-      };
-
-      socketRef.current.onerror = (error) => {
-        console.error("Deepgram WebSocket error:", error);
-      };
-
-      socketRef.current.onclose = (event) => {
-        console.log("Deepgram WebSocket closed:", event.reason);
-        setIsContinuousListening(false);
-      };
-
-      socketRef.current.onmessage = (message) => {
-        const received = JSON.parse(message.data);
-        const transcript = received.channel?.alternatives[0]?.transcript;
-        
-        if (transcript) {
-          console.log("Transcript received:", transcript);
-          executeCommand(transcript);
-        }
-      };
-    } catch (error: any) {
-      console.error("Microphone access denied or connection failed:", error);
-      
-      let errorMessage = "Microphone access denied or connection failed.";
-      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-        errorMessage = "Microphone access was denied. Please allow it in your browser settings.";
-      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-        errorMessage = "No microphone found. Please check your hardware.";
-      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
-        errorMessage = "Microphone is already in use by another application.";
-      }
-      
-      console.error(errorMessage);
-      setMicrophoneErrorMessage(errorMessage);
-      setIsMicrophonePermissionDenied(true);
-      setIsContinuousListening(false);
-    }
+  const startContinuousListening = async () => {
+    console.log("startContinuousListening called. Using Gemini Live API instead of Deepgram.");
+    // This is now handled by the VoiceChat component using Gemini Live API.
   };
 
   const executeCommand = (transcript: string) => {
@@ -223,8 +153,6 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
 
   const stopContinuousListening = () => {
     console.log("stopContinuousListening called");
-    continuousMediaRecorderRef.current?.stop();
-    socketRef.current?.close();
     setIsContinuousListening(false);
     setIsAwake(false);
   };
@@ -1404,9 +1332,9 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: '75vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden flex items-center justify-center text-zinc-500"
             >
-              <MapPanel />
+              Map functionality is being transitioned to Gemini Grounding.
             </motion.div>
           )}
         </AnimatePresence>
@@ -2059,7 +1987,7 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
                   if (isContinuousListening) {
                     stopContinuousListening();
                   } else {
-                    await startContinuousListening(true);
+                    await startContinuousListening();
                     setIsAwake(true);
                   }
                 }}

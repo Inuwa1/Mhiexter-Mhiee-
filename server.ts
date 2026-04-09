@@ -19,21 +19,10 @@ async function startServer() {
 
   const PORT = 3000;
 
-  // API route for configuration
-  app.get("/api/config", (req, res) => {
-    console.log("Received request for /api/config");
-    const key = process.env.GEMINI_API_KEY;
-    console.log("API Key requested. Key exists:", !!key);
-    
-    // Fallback check for process.env if dotenv didn't load it
-    const finalKey = key || process.env.GEMINI_API_KEY;
-    
-    if (!finalKey) {
-      console.error("GEMINI_API_KEY is missing in the server environment!");
-    }
-    res.json({
-      GEMINI_API_KEY: finalKey || "MISSING_KEY",
-    });
+  // Request logging
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.url}`);
+    next();
   });
 
   // WebRTC Signaling Logic
@@ -75,19 +64,33 @@ async function startServer() {
     });
   });
 
+  // API route for configuration
+  app.get("/api/config", (req, res) => {
+    console.log("Received request for /api/config");
+    const key = process.env.GEMINI_API_KEY;
+    
+    res.json({
+      GEMINI_API_KEY: key || "MISSING_KEY",
+    });
+  });
+
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV === "production") {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api/')) {
+        return next();
+      }
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  } else {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
   }
 
   server.listen(PORT, "0.0.0.0", () => {

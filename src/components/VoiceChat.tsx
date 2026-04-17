@@ -14,6 +14,7 @@ export default function VoiceChat({
   onClearChat: () => void
 }) {
   const [isRecording, setIsRecording] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const isSingingModeRef = useRef(false);
   const [voice, setVoice] = useState('Kore'); // Defaulting to your favorite
   const sessionRef = useRef<any>(null);
@@ -63,6 +64,7 @@ export default function VoiceChat({
   };
 
   const startVoiceChat = async () => {
+    setError(null);
     try {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
@@ -74,9 +76,17 @@ export default function VoiceChat({
       gainNodeRef.current.gain.value = 1.5; 
       gainNodeRef.current.connect(audioContextRef.current.destination);
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-      const source = audioContextRef.current.createMediaStreamSource(stream);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaStreamRef.current = stream;
+      } catch (err: any) {
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          throw new Error("Permission denied. Please grant microphone access or try opening in a new tab.");
+        }
+        throw err;
+      }
+      
+      const source = audioContextRef.current.createMediaStreamSource(mediaStreamRef.current!);
       const processor = audioContextRef.current.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
 
@@ -204,8 +214,9 @@ export default function VoiceChat({
       });
       sessionRef.current = session;
       onToggle(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to start voice chat:", err);
+      setError(err.message);
     }
   };
 
@@ -225,38 +236,41 @@ export default function VoiceChat({
   const [showVoices, setShowVoices] = useState(false);
 
   return (
-    <div className="flex items-center gap-2">
-      <div className="relative">
-        <button 
-          onClick={() => setShowVoices(!showVoices)}
-          className="bg-zinc-800 text-pink-500 text-xs rounded-lg px-2 py-1 border border-pink-500/50"
-        >
-          {voice}
-        </button>
-        {showVoices && (
-          <select 
-            value={voice}
-            onChange={(e) => {
-              setVoice(e.target.value);
-              setShowVoices(false);
-              if (isRecording) { stopVoiceChat(); setTimeout(startVoiceChat, 500); }
-            }}
-            className="absolute bottom-full mb-1 left-0 bg-zinc-900 text-pink-400 text-xs rounded-lg px-2 py-1 border border-pink-500/50 focus:outline-none"
+    <div className="flex flex-col gap-2">
+      {error && <div className="text-red-500 text-xs">{error}</div>}
+      <div className="flex items-center gap-2">
+        <div className="relative">
+          <button 
+            onClick={() => setShowVoices(!showVoices)}
+            className="bg-zinc-800 text-pink-500 text-xs rounded-lg px-2 py-1 border border-pink-500/50"
           >
-            <option value="Kore">Energetic (Kore)</option>
-            <option value="Zephyr">Sweet & Soft (Zephyr)</option>
-            <option value="Puck">Cheerful (Puck)</option>
-            <option value="Charon">Formal (Charon)</option>
-            <option value="Fenrir">Deep (Fenrir)</option>
-          </select>
-        )}
+            {voice}
+          </button>
+          {showVoices && (
+            <select 
+              value={voice}
+              onChange={(e) => {
+                setVoice(e.target.value);
+                setShowVoices(false);
+                if (isRecording) { stopVoiceChat(); setTimeout(startVoiceChat, 500); }
+              }}
+              className="absolute bottom-full mb-1 left-0 bg-zinc-900 text-pink-400 text-xs rounded-lg px-2 py-1 border border-pink-500/50 focus:outline-none"
+            >
+              <option value="Kore">Energetic (Kore)</option>
+              <option value="Zephyr">Sweet & Soft (Zephyr)</option>
+              <option value="Puck">Cheerful (Puck)</option>
+              <option value="Charon">Formal (Charon)</option>
+              <option value="Fenrir">Deep (Fenrir)</option>
+            </select>
+          )}
+        </div>
+        <button 
+          onClick={isRecording ? stopVoiceChat : startVoiceChat}
+          className={`p-2.5 rounded-xl transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-zinc-800 text-pink-500 hover:bg-pink-500 hover:text-white'}`}
+        >
+          {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+        </button>
       </div>
-      <button 
-        onClick={isRecording ? stopVoiceChat : startVoiceChat}
-        className={`p-2.5 rounded-xl transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-zinc-800 text-pink-500 hover:bg-pink-500 hover:text-white'}`}
-      >
-        {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-      </button>
     </div>
   );
 }

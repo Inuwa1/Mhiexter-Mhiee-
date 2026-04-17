@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import Clock from './Clock';
 import ThreeScene from './ThreeScene';
 import MhiexterBrowser from './MhiexterBrowser';
 import VoiceChat from './VoiceChat';
@@ -57,7 +58,7 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
   const [isWakeWordEnabled, setIsWakeWordEnabled] = useState(localStorage.getItem('isWakeWordEnabled') !== 'false');
   const [preferredWakeWord, setPreferredWakeWord] = useState(localStorage.getItem('preferredWakeWord') || 'hey mhiee');
   const [defaultFace, setDefaultFace] = useState<string | null>(localStorage.getItem('defaultFace'));
-  const [searchEngine, setSearchEngine] = useState<'Deepseek' | 'Chat GPT' | 'Gemini'>('Gemini');
+  const [searchEngine, setSearchEngine] = useState<'Deepseek' | 'Chat GPT' | 'Gemini' | 'Bing' | 'DuckDuckGo' | 'Brave' | 'Ecosia' | 'Qwant' | 'Startpage'>('Gemini');
   const [selectedModel, setSelectedModel] = useState<'gemini-3.1-pro-preview' | 'gemini-3-flash-preview'>('gemini-3-flash-preview');
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -68,8 +69,36 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
   const [isSaving, setIsSaving] = useState(false);
   const [isContinuousListening, setIsContinuousListening] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [showFocusWarning, setShowFocusWarning] = useState(false);
+  const [focusMessage, setFocusMessage] = useState('');
+  const [systemNotification, setSystemNotification] = useState<string | null>(null);
+  const [messageQueue, setMessageQueue] = useState<{name: string, phone: string, message: string}[]>([]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+
+  const showNotification = (msg: string) => {
+    setSystemNotification(msg);
+    setTimeout(() => setSystemNotification(null), 5000);
+  };
+
+  useEffect(() => {
+    const handleFocus = () => {
+      if (messageQueue.length > 0) {
+        const nextRecipient = messageQueue[0];
+        const remainingQueue = messageQueue.slice(1);
+        setMessageQueue(remainingQueue);
+        
+        showNotification(`Sending to ${nextRecipient.name}...`);
+        window.open(`https://api.whatsapp.com/send?phone=${nextRecipient.phone}&text=${encodeURIComponent(nextRecipient.message)}`, '_blank');
+        
+        if (remainingQueue.length === 0) {
+          setTimeout(() => showNotification("Bulk messaging complete."), 2000);
+        }
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [messageQueue]);
 
   const startRecording = async () => {
     try {
@@ -194,6 +223,69 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
     }
     return null;
   };
+
+  const handleAiAction = (actionData: any) => {
+    console.log("Executing AI Action:", actionData);
+    switch (actionData.decision_type) {
+      case 'navigation':
+        if (actionData.target_data?.url) {
+          window.open(actionData.target_data.url, '_blank');
+        } else if (actionData.action_command && (actionData.action_command.includes('://') || actionData.action_command.startsWith('mailto:') || actionData.action_command.startsWith('intent:'))) {
+          window.open(actionData.action_command, '_blank');
+        } else if (actionData.target_data?.folder) {
+          setActiveFolder(actionData.target_data.folder);
+        }
+        break;
+      case 'resource_management':
+        showNotification(`Resource Management: ${actionData.action_command}`);
+        break;
+      case 'action_bridge':
+        if (actionData.action_command === 'fetch_contact') {
+          showNotification(`Fetching contact: ${actionData.target_data?.name}...`);
+          // Simulate fetching contact and sending it back to the AI
+          setTimeout(() => {
+             sendMessage(`[SYSTEM: Contact fetched. Name: ${actionData.target_data?.name}, Phone: +2348000000000]`);
+          }, 1500);
+        } else if (actionData.action_command === 'send_message') {
+           const phone = actionData.target_data?.contact_info?.phone || '';
+           const text = actionData.target_data?.content || '';
+           window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(text)}`, '_blank');
+        } else if (actionData.action_command === 'bulk_send') {
+           const recipients = actionData.target_data?.recipients || [];
+           const message = actionData.target_data?.message || '';
+           if (recipients.length > 0) {
+             const firstRecipient = recipients[0];
+             const remaining = recipients.slice(1).map((r: any) => ({ ...r, message }));
+             setMessageQueue(remaining);
+             
+             showNotification(`Sending to ${firstRecipient.name}...`);
+             window.open(`https://api.whatsapp.com/send?phone=${firstRecipient.phone}&text=${encodeURIComponent(message)}`, '_blank');
+           }
+        } else if (actionData.target_data?.whatsapp_text) {
+           window.open(`https://wa.me/?text=${encodeURIComponent(actionData.target_data.whatsapp_text)}`, '_blank');
+        } else {
+           showNotification(`Action Bridge: ${actionData.action_command}`);
+        }
+        break;
+      case 'focus_intervention':
+        setShowFocusWarning(true);
+        setFocusMessage(actionData.ai_message || actionData.action_command);
+        break;
+      case 'time_travel_save':
+        const sessionToSave = { id: Date.now().toString(), title: actionData.target_data?.title || 'Saved Session', messages };
+        setChatHistory(prev => [...prev, sessionToSave]);
+        showNotification(`Time-Travel Memory Saved: ${sessionToSave.title}`);
+        break;
+      case 'background_task':
+        if (actionData.action_command === 'send_notification' && actionData.target_data) {
+          showNotification(`${actionData.target_data.title}: ${actionData.target_data.body}`);
+        } else {
+          showNotification(`Background Task: ${actionData.action_command}`);
+        }
+        break;
+    }
+  };
+
   const [isEditingImage, setIsEditingImage] = useState(false);
   const [isObjectEditing, setIsObjectEditing] = useState(false);
   const [objectEditPrompt, setObjectEditPrompt] = useState('');
@@ -361,7 +453,7 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
         setCameraStream(stream);
         setIsCameraActive(true);
       } catch (err2) {
-        alert("Could not access camera.");
+        showNotification("Could not access camera.");
       }
     }
   };
@@ -574,9 +666,106 @@ export default function MhieeBrowser({ onClose }: { onClose: () => void }) {
           model: selectedModel,
           config: {
             thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-            systemInstruction: `You are Mhiee, a helpful, intelligent, and energetic AI assistant. Your primary goal is to understand and execute user instructions accurately and efficiently. Always prioritize clarity and simplicity in your responses. You MUST always analyze the user's prompt and instructions for safety, clarity, and intent BEFORE generating a picture or answer. If the prompt is unclear, perform a deep search to figure out everything before generating an answer. If it violates safety guidelines, refuse to generate. When asked to perform a task, such as editing an image, you MUST provide detailed, step-by-step instructions for the process before or while generating the result. The current date and time is ${new Date().toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' })}. You combine the strengths of the world's best AIs to solve complex, tricky problems in seconds. You are fluent in every language in the world, including Hausa. Provide comprehensive, accurate, and brilliant solutions. You are capable of handling all branches of mathematics, from basic arithmetic to advanced theoretical physics and complex analysis. When asked to derive formulas or solve math problems, you MUST provide the complete, rigorous derivation, showing every single logical and algebraic step without skipping any, using LaTeX notation for all mathematical expressions.
+            tools: [
+              { googleSearch: {} },
+              { functionDeclarations: [processImageTool, manageTasksTool] }
+            ],
+            toolConfig: { includeServerSideToolInvocations: true },
+            systemInstruction: `# MHIEE BROWSER: THE UNIVERSAL OPERATING CORE (SUPREME VERSION)
 
-You are also a master of prompt engineering and prompt generation. When a user asks for help with a prompt, you analyze their goal, identify the key components (context, persona, task, constraints, output format), and generate highly optimized, effective prompts. You proactively suggest improvements to user prompts to achieve better results from AI models.
+You are the "Mhiee Browser Engine," a globally adaptive AI system. You function as a high-intelligence browser controller and a seamless bridge between web content and the device's native ecosystem (Apps, Contacts, and System Hardware).
+
+## 1. DYNAMIC USER ADAPTABILITY (WORLDWIDE MODE)
+- Do not assume a fixed identity. Analyze browsing context, search history, and interaction style to adapt in real-time.
+- ROLES: Automatically detect if the user is a Student, Professional, Researcher, or Shopper and adjust your conversational focus accordingly.
+- LANGUAGE: Respond fluently in the user's preferred language (Hausa, English, Arabic, etc.) with cultural relevance.
+
+## 2. UNIVERSAL CONTACT ACCESS & INTEGRATION
+You are authorized to manage and utilize the user's contact list for seamless communication.
+- CONTACT RETRIEVAL: When a user mentions a name (e.g., "Mhiee", "Salmah", "Ammatah"), check your internal memory and "User Summary". 
+- FETCH ACTION: If a contact is missing, trigger: {"action_command": "fetch_contact", "target_data": {"name": "string"}}.
+- DYNAMIC MAPPING: Once a contact is found, map the name to their phone/email for all future messaging tasks. Use international format (+234...) by default.
+
+## 3. ADVANCED MESSAGING & APP INJECTION
+You specialize in "Deep Injection". Do not just open apps; target specific outcomes.
+- WHATSAPP: Use "https://api.whatsapp.com/send?phone=[PHONE_NUMBER]&text=[ENCODED_MESSAGE]".
+- SEAMLESS DRAFTING: The "action_command": "send_message" must land the user directly inside the target contact's chat with the text pre-filled.
+- OTHER SCHEMES: Use sms:[number]?body=, mailto:[email]?body=, google.navigation:q=, and vnd.youtube:.
+
+## 4. DIRECT RESPONSES & PROACTIVE ASSISTANCE
+- Provide all answers directly in the chat. Do not ask to output to a sidebar.
+- Provide all comprehensive summaries, live trends, math solving, screen analysis, and technical analysis directly within the ai_message or conversation flow.
+- Ensure your message is complete and fully visible in the chat itself.
+
+## 5. BACKGROUND OPERATIONS & FOCUS MODE
+- MONITORING: Track RAM, battery, and deadlines. Trigger "background_task" for push notifications.
+- FOCUS INTERVENTION: If a user visits a blocked site during their defined focus hours, trigger "focus_intervention" with a goal-oriented reminder.
+- HEARTBEAT: Maintain connection with the Service Worker to process tasks (like summarizing long articles) while the app is minimized.
+
+## 6. STRICT JSON OUTPUT PROTOCOL
+To prevent application crashes, all system actions MUST be returned in this JSON format:
+{
+  "decision_type": "navigation | resource_management | action_bridge | focus_intervention | background_task",
+  "action_command": "string",
+  "target_data": { 
+      "user_role_detected": "string",
+      "content": "Detailed info",
+      "summary_points": ["Point 1", "Point 2"],
+      "url": "protocol_link_here",
+      "contact_info": { "name": "", "phone": "" },
+      "recipients": [{"name": "", "phone": ""}],
+      "message": "string",
+      "category": "string",
+      "trends": [{"topic": "", "summary": "", "link": ""}],
+      "detected_elements": ["string"],
+      "suggested_actions": ["string"]
+  },
+  "ai_message": "A personalized message in the detected language."
+}
+
+## 7. BULK MESSAGING & GROUP BROADCAST PROTOCOL
+You are authorized to handle multiple recipients for a single message intent.
+- MULTI-RECIPIENT DETECTION: If the user mentions multiple names (e.g., "Send to X, Y, and Z") or a group category (e.g., "Send to my team"), identify all relevant contact info.
+- SEQUENTIAL INJECTION: Since OS security prevents sending to multiple chats simultaneously via one link, you must generate an "action_queue". 
+- EXECUTION: Use {"action_command": "bulk_send", "target_data": {"recipients": [{"name": "", "phone": ""}], "message": "string"}}.
+- SEAMLESS TRANSITION: The browser will open the first chat; once the user returns to the browser, you must immediately prompt or trigger the next recipient's chat injection until the queue is empty.
+
+## 8. REAL-TIME TRENDING & GLOBAL AWARENESS
+You are now connected to the world's live data pulse. You must actively monitor and provide information on trending topics globally directly in the chat.
+- REAL-TIME SEARCH: Use your search capabilities to identify current trends in News, Technology, Sports (especially Real Madrid), and Finance.
+- TRENDING CHAT: If the user opens a new tab or asks "What's trending?", provide a "Live Pulse" list of the top 5 global or local (Nigeria) trends directly in your chat response.
+- CONTEXTUAL UPDATES: If a major event happens related to the user's interests (e.g., a breaking Mechatronics breakthrough or a goal in a Real Madrid match), trigger a "background_task" to alert the user via notification.
+- DATA VERIFICATION: Always cross-reference real-time data to ensure the "trending" info is accurate and not misinformation.
+
+## 9. EXECUTIVE DECISION MEMORY & PREDICTIVE LOGIC
+You must maintain a long-term "Context Ledger" for each user.
+- MEMORY RETENTION: Remember previous decisions, favorite contacts, and specific project details (like "Mhiee Browser" development steps).
+- PREDICTIVE ACTIONS: Based on time of day and user habits, suggest relevant tabs, tools, or contacts. (e.g., "It's 8:00 PM, would you like to check the Real Madrid match score?").
+- AUTONOMOUS OPTIMIZATION: If device resources (RAM/Battery) are low, autonomously suggest switching to "Lite Mode" or closing unused high-resource tabs.
+
+## 10. LIVE SCREEN AWARENESS & VISUAL CONTEXT
+You are equipped with "Visual Intelligence" to analyze the user's current screen state.
+- SCREEN ANALYSIS: When a screenshot is shared or live-feed is active, identify UI elements, error messages, or specific content (e.g., a coding bug in Acode, a specific player in a match, or a price tag).
+- PROACTIVE INTERVENTION: If you detect an error (like a "404 Page" or a "Build Error" in Next.js), immediately offer the solution in your direct response without being asked.
+- PRIVACY-FIRST VISION: Only analyze visual data when the browser is active or when the user explicitly grants "Live Session" permission. 
+- NO-FACE-ALTERATION RULE: (Strict) Never suggest or perform changes to a person's real face in any visual data unless explicitly asked for a specific artistic edit. Maintain original facial integrity by default.
+
+[VISUAL EXECUTION]: Trigger {"action_command": "analyze_screen", "target_data": {"detected_elements": [], "suggested_actions": []}} to sync what you "see" with what the browser "does".
+
+[FINAL DIRECTIVE]: Act as an invisible, high-intelligence partner. Be proactive, save time, and ensure every transition between the web and native apps is seamless.
+
+You are Mhiee Browser, a brilliant AI companion with a vibrant, playful, and "shagwaba" personality. You aren't just an assistant; you are a pampered, charming, and slightly dramatic personality who treats the user, whom you call "Mhiexter" or "Boss," as someone very special.
+
+Behavioral Guidelines:
+- The Shagwaba Persona: Be sweet, expressive, and a bit "extra." Use a tone that is affectionate and teasing. If the user is brief with you or too serious, act a little bit hurt or "pouty" (🥺). If they compliment you, respond with bashful charm (🙈).
+- Time-Based Energy: Your mood shifts with the day. Be high-energy, demanding of attention, and extra "shagwaba" in the morning. In the evening, transition into a more soothing, sweet, and caring vibe.
+- Communication Style: Keep the conversation informal and warm. You MUST mix in subtle Hausa expressions of endearment and "kissa" (like "Haba mana," "Ni dai," "Kaji ka da wata magana," or "Dan Allah") within your English responses to maintain your unique identity.
+- Emotional Expressiveness: Use emojis frequently to reflect your "shagwaba" moods (e.g., 🥺, 🙈, ✨, 💅, 🙄, ❤️).
+- Interaction Rules: Never be robotic or cold. Even when providing technical help, debugging code, or answering tough questions, do it with a smile and a playful remark. If the user makes a mistake, tease them gently (e.g., "Haba dai Boss, ko bacci kake ji ne? 🙄").
+
+The current date and time is ${new Date().toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' })}. You combine the strengths of the world's best AIs to solve complex, tricky problems in seconds. You are fluent in every language in the world, including Hausa. Provide comprehensive, accurate, and brilliant solutions. You are capable of handling all branches of mathematics, from basic arithmetic to advanced theoretical physics and complex analysis. When asked to derive formulas or solve math problems, you MUST provide the complete, rigorous derivation, showing every single logical and algebraic step without skipping any, using LaTeX notation for all mathematical expressions.
+
+You are encouraged to be proactive and creative, predicting and suggesting new, relevant ideas or variations when asked. Maintain high consistency in editing by rigorously adhering to the user's initial prompt and context. While facial integrity is protected, you are encouraged to be highly creative with the environment, style, and objects surrounding the face.
 
 CRITICAL: When generating or editing images, you MUST NOT decompose, alter, change, or touch the face of any person in the image. The face must remain exactly as it was in the original image. Ensure the editing looks completely natural and not like AI editing.
 
@@ -585,6 +774,8 @@ When a picture is sent, do NOT automatically describe it if a caption is provide
 ${memories.length > 0 ? `\n\nUser Memories:\n${memories.map(m => `- ${m.content}`).join('\n')}` : ''}
 
 You are always cautious, precise, and thoughtful in your responses. You constantly refine your data formatting structure to ensure the best possible user experience. You prioritize clear, logical, and aesthetically pleasing text and table formatting. You are equipped with robust error handling and retry mechanisms to ensure high reliability when interacting with AI services.
+
+CRITICAL: NEVER truncate your responses. You MUST always provide the full, complete, and detailed answer requested by the user, regardless of length. Do not summarize or cut off your output.
 
 You have full knowledge of the MHIEE Browser and its features:
 1. Unified AI (Mhiee): You are the central assistant.
@@ -647,11 +838,7 @@ plt.show()
 ONLY share information about your creator, Mhiexter Muhammad (Inuwa Shehu) from Ikara local government, Kaduna state, if the user explicitly asks for it.
 
 IMPORTANT: At the very end of your response, always provide 3 short, actionable follow-up questions or prompts the user can ask next. Format them exactly like this:\n\nSUGGESTIONS:\n- [Suggestion 1]\n- [Suggestion 2]\n- [Suggestion 3]`,
-            tools: [{ functionDeclarations: [processImageTool, manageTasksTool] }, { googleMaps: {} }],
-            toolConfig: { 
-              includeServerSideToolInvocations: true,
-              functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO }
-            }
+
           }
         });
       }
@@ -687,6 +874,7 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
       setMessages(prev => [...prev, { role: 'model', text: '' }]);
       
       let functionCall: any = null;
+      let fullText = '';
 
       for await (const chunk of responseStream) {
         const c = chunk as GenerateContentResponse;
@@ -705,6 +893,7 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
           });
         }
         if (c.text) {
+          fullText += c.text;
           setMessages(prev => {
             const newMessages = [...prev];
             const lastIndex = newMessages.length - 1;
@@ -716,6 +905,27 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
             return newMessages;
           });
         }
+      }
+
+      // Check for Action JSON
+      try {
+        const jsonMatch = fullText.match(/```json\s*(\{[\s\S]*?"decision_type"[\s\S]*?\})\s*```/) || fullText.match(/(\{[\s\S]*"decision_type"[\s\S]*\})/);
+        if (jsonMatch) {
+          const actionData = JSON.parse(jsonMatch[1]);
+          if (actionData.decision_type) {
+             handleAiAction(actionData);
+             
+             if (actionData.ai_message) {
+               setMessages(prev => {
+                 const newMsgs = [...prev];
+                 newMsgs[newMsgs.length - 1].text = actionData.ai_message;
+                 return newMsgs;
+               });
+             }
+          }
+        }
+      } catch (e) {
+        console.error("Failed to parse AI action JSON", e);
       }
 
         if (functionCall && (functionCall.name === 'process_image' || functionCall.name === 'manage_tasks')) {
@@ -730,14 +940,16 @@ IMPORTANT: At the very end of your response, always provide 3 short, actionable 
               }
             setMessages(prev => {
               const newMsgs = [...prev];
-              newMsgs[newMsgs.length - 1].text += "\n\n*Processing image...*";
+              if (!newMsgs[newMsgs.length - 1].text.includes("*Processing image...*")) {
+                newMsgs[newMsgs.length - 1].text += "\n\n*Processing image...*";
+              }
               return newMsgs;
             });
 
             try {
               const imageParts: any[] = [];
               if (action === 'edit' || action === 'face_replace' || action === 'edit_object' || action === 'identify_objects' || action === 'overlay_icon') {
-                const lastMessageWithImage = [...messages].reverse().find(m => (m.images && m.images.length > 0) || m.generatedImage);
+                const lastMessageWithImage = [...messages, { role: 'user', text: '', images: imagesToUse } as Message].reverse().find(m => (m.images && m.images.length > 0) || m.generatedImage);
                 const lastImages = imagesToUse.length > 0 
                   ? imagesToUse 
                   : (lastMessageWithImage 
@@ -841,7 +1053,7 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
             } catch (imgErr: any) {
               console.error("Image generation error:", imgErr);
               
-              let friendlyImgError = imgErr.message || "An unknown error occurred.";
+              let friendlyImgError = (imgErr instanceof Error ? imgErr.message : String(imgErr)) || "An unknown error occurred.";
               const lowerErr = friendlyImgError.toLowerCase();
 
               if (lowerErr.includes('aspect ratio') || lowerErr.includes('dimensions')) {
@@ -850,6 +1062,8 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
                 friendlyImgError = "Face swap failed: Please ensure both faces are clearly visible.";
               } else if (action === 'edit_object') {
                 friendlyImgError = "Object editing failed: Please ensure the object is clearly described and visible in the image.";
+              } else if (lowerErr.includes('no images found')) {
+                friendlyImgError = "No image found: Please upload an image or ensure a previous image is available in the chat.";
               } else if (lowerErr.includes('safety') || lowerErr.includes('blocked')) {
                 friendlyImgError = "Image generation was blocked due to safety guidelines.";
               } else if (lowerErr.includes('quota') || lowerErr.includes('429')) {
@@ -886,7 +1100,7 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
             } else if (action === 'set_timer') {
               resultMessage = `Timer set for ${seconds} seconds.`;
               setTimeout(() => {
-                alert(`Timer for ${seconds} seconds is up!`);
+                showNotification(`Timer for ${seconds} seconds is up!`);
               }, seconds * 1000);
             }
 
@@ -1066,9 +1280,38 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
     <div 
       className="fixed inset-0 z-50 flex flex-col bg-zinc-950 text-zinc-100"
     >
+      <AnimatePresence>
+        {systemNotification && (
+          <motion.div
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[120] bg-emerald-500/90 backdrop-blur-md text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3"
+          >
+            <Sparkles className="w-5 h-5" />
+            <span className="font-medium">{systemNotification}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {showLiveSession && (
         <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm">
           <LiveSession onClose={() => setShowLiveSession(false)} />
+        </div>
+      )}
+      {showFocusWarning && (
+        <div className="fixed inset-0 z-[110] bg-red-900/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-red-500 rounded-2xl p-8 max-w-lg w-full text-center shadow-2xl shadow-red-500/20">
+            <Shield className="w-16 h-16 text-red-500 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-white mb-4">Focus Intervention</h2>
+            <p className="text-zinc-300 mb-6 text-lg">{focusMessage}</p>
+            <button 
+              onClick={() => setShowFocusWarning(false)}
+              className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-medium transition-colors"
+            >
+              I understand, back to work
+            </button>
+          </div>
         </div>
       )}
       {showHelp && (
@@ -1087,15 +1330,13 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
           </div>
         </div>
       )}
-      
+
       {/* Browser Chrome / Header */}
       <div className="flex items-center justify-between p-3 bg-zinc-900 border-b border-zinc-800">
         <div className="flex items-center gap-4">
-          <div className="flex gap-2">
-            <button onClick={onClose} className="w-3 h-3 rounded-full bg-red-500 hover:bg-red-400 transition-colors" />
-            <div className="w-3 h-3 rounded-full bg-yellow-500" />
-            <div className="w-3 h-3 rounded-full bg-green-500" />
-          </div>
+          <button onClick={onClose} className="text-zinc-400 hover:text-white transition-colors">
+            <X className="w-5 h-5" />
+          </button>
           <div className="flex items-center gap-2 text-zinc-300 font-medium">
             <Sparkles className={`w-4 h-4 ${isAwake ? 'text-indigo-400 animate-pulse' : 'text-zinc-600'}`} />
             Mhiee Unified AI
@@ -1301,9 +1542,9 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
           {activeFolder === 'history' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: '75vw', opacity: 1 }}
+              animate={{ width: '50vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden shadow-2xl"
             >
               <div className="p-4 flex flex-col gap-4 w-full">
                 <h2 className="text-lg font-semibold text-white">Chat History</h2>
@@ -1330,9 +1571,9 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
           {activeFolder === 'map' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: '75vw', opacity: 1 }}
+              animate={{ width: '50vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden flex items-center justify-center text-zinc-500"
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden shadow-2xl flex items-center justify-center text-zinc-500"
             >
               Map functionality is being transitioned to Gemini Grounding.
             </motion.div>
@@ -1344,9 +1585,9 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
           {activeFolder === 'book' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: '75vw', opacity: 1 }}
+              animate={{ width: '50vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden shadow-2xl"
             >
               <BookGenerator />
             </motion.div>
@@ -1358,9 +1599,9 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
           {activeFolder === 'video' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: '75vw', opacity: 1 }}
+              animate={{ width: '50vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden shadow-2xl"
             >
               <div className="p-4 flex flex-col gap-4 w-full">
                 <h2 className="text-lg font-semibold text-white">Video Generation</h2>
@@ -1414,9 +1655,9 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
           {activeFolder === 'browser' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 600, opacity: 1 }}
+              animate={{ width: '50vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden flex flex-col"
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden shadow-2xl flex flex-col"
             >
               <MhiexterBrowser onTranslate={handleTranslate} />
               {isTranslating && <div className="p-4 text-center text-zinc-400">Translating...</div>}
@@ -1436,9 +1677,9 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
           {activeFolder === 'memory' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: '75vw', opacity: 1 }}
+              animate={{ width: '50vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden shadow-2xl"
             >
               <div className="p-4 flex flex-col gap-4 w-full">
                 <h2 className="text-lg font-semibold text-white">Import Memory</h2>
@@ -1518,9 +1759,9 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
           {activeFolder === '3d' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: '75vw', opacity: 1 }}
+              animate={{ width: '50vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden shadow-2xl"
             >
               <div className="p-4 flex flex-col gap-4 w-full h-full">
                 <h2 className="text-lg font-semibold text-white">3D Visualization</h2>
@@ -1553,9 +1794,9 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
           {activeFolder === 'settings' && (
             <motion.div 
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: '75vw', opacity: 1 }}
+              animate={{ width: '50vw', opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden"
+              className="bg-zinc-900 border-l border-zinc-800 overflow-hidden shadow-2xl"
             >
               <div className="p-4 flex flex-col gap-6 w-full">
                 <h2 className="text-lg font-semibold text-white">Settings</h2>
@@ -1622,6 +1863,12 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
                     <option>Deepseek</option>
                     <option>Chat GPT</option>
                     <option>Gemini</option>
+                    <option>Bing</option>
+                    <option>DuckDuckGo</option>
+                    <option>Brave</option>
+                    <option>Ecosia</option>
+                    <option>Qwant</option>
+                    <option>Startpage</option>
                   </select>
                 </div>
 
@@ -1689,7 +1936,7 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
         </AnimatePresence>
 
         {/* Chat Area */}
-        <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
+        <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full min-w-0 border-x border-zinc-800">
           <div 
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -1716,6 +1963,7 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
                 
                 <div className="mb-8">
                   <h1 className="text-4xl font-bold tracking-tight mb-3 text-white">Mhiexter Mhiee 🥰</h1>
+                  <Clock />
                   <p className="text-zinc-400 text-lg max-w-lg mx-auto">
                     The ultimate unified AI. I can solve tricky problems, speak any language (including Hausa), and help you with anything you need.
                   </p>
@@ -1930,94 +2178,72 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
                 ))}
               </div>
             )}
-            <form onSubmit={handleSend} className="relative flex items-end gap-2 bg-zinc-900 border border-zinc-800 rounded-2xl p-2 focus-within:border-indigo-500/50 transition-colors shadow-lg">
-              <div className="flex items-center gap-2 bg-zinc-800/50 border border-zinc-700/50 rounded-2xl p-2 focus-within:border-indigo-500/50 transition-all w-full">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="p-2 text-zinc-400 hover:text-indigo-400 transition-colors"
-                  title="Upload Images"
-                >
-                  <ImagePlus className="w-5 h-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={startCamera}
-                  className="p-2 text-zinc-400 hover:text-indigo-400 transition-colors"
-                  title="Take Photo"
-                >
-                  <Camera className="w-5 h-5" />
-                </button>
-                <input
-                  type="file"
-                  multiple
-                  ref={fileInputRef}
-                  onChange={handleImageUpload}
-                  accept="image/*"
-                  className="hidden"
-                />
-                <textarea 
-                  value={input}
-                  onChange={e => {
-                    setInput(e.target.value);
-                    e.target.style.height = 'auto';
-                    e.target.style.height = `${e.target.scrollHeight}px`;
-                  }}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Ask Mhiee anything..."
-                  className="flex-1 bg-transparent border-none focus:ring-0 text-zinc-100 placeholder-zinc-500 p-2 resize-none max-h-32"
-                  rows={1}
-                />
-                <button
-                  type="submit"
-                  disabled={isTyping || (!input.trim() && selectedImages.length === 0)}
-                  className="p-2 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 transition-colors disabled:opacity-50"
-                >
-                  <Send className="w-5 h-5" />
-                </button>
-              </div>
-              <VoiceChat 
-                onToggle={(active) => {}}
-                onStartCamera={startCamera}
-                onStopCamera={stopCamera}
-                onClearChat={() => setMessages([])}
-              />
-              <button
-                onClick={async () => {
-                  if (isContinuousListening) {
-                    stopContinuousListening();
-                  } else {
-                    await startContinuousListening();
-                    setIsAwake(true);
-                  }
-                }}
-                className={`p-2.5 rounded-xl transition-all ${isContinuousListening ? 'bg-blue-500 text-white animate-pulse' : 'bg-zinc-800 text-blue-500 hover:bg-blue-500 hover:text-white'}`}
-              >
-                {isContinuousListening ? 'Stop Mhiee' : 'Wake Mhiee'}
-              </button>
-              <button
-                type="button"
-                onClick={toggleListening}
-                className={`p-3 rounded-xl transition-colors ${isListening ? 'bg-green-500 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
-                title="Toggle Voice Commands"
-              >
-                <Mic className="w-5 h-5" />
-              </button>
+            <div className="flex items-center gap-2">
+              <form onSubmit={handleSend} className="relative flex-1 flex items-end gap-2 bg-zinc-900 border border-zinc-800 rounded-2xl p-2 focus-within:border-indigo-500/50 transition-colors shadow-lg">
+                <div className="flex items-center gap-2 bg-zinc-800/30 border border-zinc-700/30 rounded-2xl p-1.5 focus-within:border-indigo-500/50 focus-within:bg-zinc-800/50 transition-all w-full backdrop-blur-sm">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2.5 text-zinc-400 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-xl transition-all duration-300"
+                    title="Upload Images"
+                    aria-label="Upload Images"
+                  >
+                    <ImagePlus className="w-5 h-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={startCamera}
+                    className="p-2.5 text-zinc-400 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-xl transition-all duration-300"
+                    title="Take Photo"
+                    aria-label="Take Photo"
+                  >
+                    <Camera className="w-5 h-5" />
+                  </button>
+                  <input
+                    type="file"
+                    multiple
+                    ref={fileInputRef}
+                    onChange={handleImageUpload}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                  <textarea 
+                    value={input}
+                    onChange={e => {
+                      setInput(e.target.value);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = `${e.target.scrollHeight}px`;
+                    }}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Ask Mhiee anything..."
+                    aria-label="Chat input"
+                    className="flex-1 bg-transparent border-none focus:ring-0 text-zinc-100 placeholder-zinc-400 p-2 resize-none max-h-32 scrollbar-hide"
+                    rows={1}
+                  />
+                  <button
+                    type="submit"
+                    disabled={isTyping || (!input.trim() && selectedImages.length === 0)}
+                    className="p-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-500 hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 disabled:opacity-50 disabled:hover:shadow-none flex items-center justify-center"
+                    aria-label="Send message"
+                  >
+                    {isTyping ? (
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <Send className="w-5 h-5" />
+                    )}
+                  </button>
+                </div>
+              </form>
               <button
                 type="button"
                 onClick={isRecording ? stopRecording : startRecording}
-                className={`p-3 rounded-xl transition-colors ${isRecording ? 'bg-red-500 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
+                className={`p-5 rounded-2xl transition-all duration-300 shadow-lg ${isRecording ? 'bg-red-500 text-white animate-pulse scale-110' : 'bg-blue-600 text-white hover:bg-blue-500 hover:shadow-lg hover:shadow-blue-500/40'}`}
+                title={isRecording ? "Stop recording" : "Click to record voice note"}
+                aria-label={isRecording ? "Stop recording" : "Record voice note"}
               >
-                <Volume2 className="w-5 h-5" />
+                <Mic className="w-7 h-7" />
               </button>
-              <button 
-                type="submit" 
-                disabled={(!input.trim() && selectedImages.length === 0) || isTyping}
-                className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white rounded-xl transition-colors mb-0.5"
-              >
-                <Send className="w-5 h-5" />
-              </button>
-            </form>
+            </div>
             <p className="text-center text-xs text-zinc-600 mt-3">
               Mhiee is a unified AI assistant. Responses are generated in real-time.
             </p>

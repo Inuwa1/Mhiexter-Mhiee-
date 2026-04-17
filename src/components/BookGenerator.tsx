@@ -20,7 +20,7 @@ interface Book {
 }
 
 const styles = StyleSheet.create({
-  page: { padding: 30 },
+  page: { padding: 90 },
   title: { fontSize: 24, marginBottom: 20, textAlign: 'center' },
   chapterTitle: { fontSize: 18, marginTop: 15, marginBottom: 10 },
   paragraph: { fontSize: 12, marginBottom: 10, lineHeight: 1.5 },
@@ -139,45 +139,46 @@ export default function BookGenerator() {
   };
 
   return (
-    <div className="p-6 bg-zinc-900 text-zinc-100 rounded-xl h-full overflow-y-auto flex gap-6">
-      <div className="w-1/3 border-r border-zinc-700 pr-4">
-        <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><History /> History</h3>
+    <div className="px-12 py-8 bg-zinc-900 text-zinc-100 rounded-2xl h-full overflow-y-auto flex gap-8">
+      <div className="w-1/4 border-r border-zinc-800 pr-6">
+        <h3 className="text-lg font-bold mb-6 flex items-center gap-2 text-zinc-400"><History className="w-5 h-5" /> History</h3>
         {history.map(book => (
-          <div key={book.id} onClick={() => setCurrentBook(book)} className="p-2 bg-zinc-800 rounded mb-2 cursor-pointer hover:bg-zinc-700">
+          <div key={book.id} onClick={() => setCurrentBook(book)} className="p-3 bg-zinc-800/50 rounded-lg mb-3 cursor-pointer hover:bg-zinc-700 transition-colors text-sm truncate">
             {book.title}
           </div>
         ))}
       </div>
       <div className="flex-1">
-        <h2 className="text-2xl font-bold mb-4">Book Generator</h2>
-        <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Enter book topic..." className="w-full p-3 bg-zinc-800 rounded-lg mb-4" />
-        <button onClick={generateOutline} className="px-4 py-2 bg-indigo-600 rounded-lg flex items-center gap-2 mb-6">
-          {isGenerating ? <Loader2 className="animate-spin" /> : <Plus />} Generate Outline
-        </button>
+        <h2 className="text-3xl font-extrabold mb-6 tracking-tight">Book Generator</h2>
+        <div className="flex gap-3 mb-8">
+          <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Enter book topic..." className="flex-1 p-4 bg-zinc-800 rounded-xl border border-zinc-700 focus:border-indigo-500 outline-none transition-all" />
+          <button onClick={generateOutline} className="px-6 py-4 bg-indigo-600 hover:bg-indigo-500 rounded-xl flex items-center gap-2 font-bold transition-all shadow-lg shadow-indigo-900/20">
+            {isGenerating ? <Loader2 className="animate-spin" /> : <Plus className="w-5 h-5" />} Generate Outline
+          </button>
+        </div>
 
         {currentBook && (
-          <div>
-            <h3 className="text-2xl font-semibold mb-4">{currentBook.title}</h3>
-            {currentBook.chapters.map((chapter, index) => (
-              <div key={index} className="mb-4 p-4 bg-zinc-800 rounded-lg flex items-center gap-4">
-                <input type="checkbox" checked={selectedChapters.includes(index)} onChange={() => toggleChapterSelection(index)} className="w-5 h-5" />
-                <div className="flex-1">
-                  <h4 className="font-bold">{chapter.title}</h4>
-                  <div className="mt-2 flex items-center gap-2">
-                    <button onClick={() => generateChapter(index, currentBook)} disabled={chapter.status === 'generating'} className="px-3 py-1 bg-emerald-600 rounded text-sm">
-                      {chapter.status === 'generating' ? 'Generating...' : chapter.status === 'done' ? 'Regenerate' : 'Generate Content'}
-                    </button>
-                    {chapter.status === 'done' && <span className="text-emerald-400 text-sm">Done</span>}
+          <div className="bg-zinc-800/30 p-6 rounded-2xl border border-zinc-800">
+            <h3 className="text-2xl font-bold mb-6 text-indigo-300">{currentBook.title}</h3>
+            <div className="space-y-3 mb-8">
+              {currentBook.chapters.map((chapter, index) => (
+                <div key={index} className="p-4 bg-zinc-800 rounded-xl flex items-center gap-4 hover:bg-zinc-700/50 transition-colors">
+                  <input type="checkbox" checked={selectedChapters.includes(index)} onChange={() => toggleChapterSelection(index)} className="w-5 h-5 accent-indigo-500" />
+                  <div className="flex-1">
+                    <h4 className="font-semibold">{index + 1}. {chapter.title}</h4>
                   </div>
+                  <button onClick={() => generateChapter(index, currentBook)} disabled={chapter.status === 'generating'} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${chapter.status === 'generating' ? 'bg-zinc-600' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
+                    {chapter.status === 'generating' ? 'Generating...' : chapter.status === 'done' ? 'Regenerate' : 'Generate'}
+                  </button>
                 </div>
-              </div>
-            ))}
-            <div className="flex gap-4">
-              <button onClick={generateSelectedChapters} disabled={selectedChapters.length === 0 || isGenerating} className="px-4 py-2 bg-blue-600 rounded-lg flex items-center gap-2">
-                <BookOpen /> Generate Selected ({selectedChapters.length})
+              ))}
+            </div>
+            <div className="flex gap-4 pt-6 border-t border-zinc-700">
+              <button onClick={generateSelectedChapters} disabled={selectedChapters.length === 0 || isGenerating} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl flex items-center gap-2 font-bold transition-all">
+                <BookOpen className="w-5 h-5" /> Generate Selected ({selectedChapters.length})
               </button>
-              <PDFDownloadLink document={<PDFDocument book={currentBook} />} fileName={`${currentBook.title}.pdf`} className="px-4 py-2 bg-green-600 rounded-lg flex items-center gap-2">
-                {({ blob, url, loading, error }) => (loading ? 'Loading document...' : <><Download /> Download PDF</>)}
+              <PDFDownloadLink document={<PDFDocument book={currentBook} />} fileName={`${currentBook.title}.pdf`} className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl flex items-center gap-3 font-bold text-white transition-all shadow-lg shadow-emerald-900/20">
+                {({ blob, url, loading, error }) => (loading ? 'Loading document...' : <><Download className="w-5 h-5" /> Download PDF</>)}
               </PDFDownloadLink>
             </div>
           </div>

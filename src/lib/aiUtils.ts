@@ -11,10 +11,17 @@ export async function callAiWithRetry<T>(
   try {
     return await apiCall();
   } catch (error: any) {
-    // Check if error is 429 or RESOURCE_EXHAUSTED
-    const isRateLimited = error?.status === 429 || error?.message?.includes('RESOURCE_EXHAUSTED');
-    if (isRateLimited && retries > 0) {
-      console.warn(`Quota exceeded, retrying in ${delay}ms...`);
+    // Check if error is 429, 500, or network-level (status 0)
+    const isRetryable = 
+      error?.status === 429 || 
+      error?.status === 500 || 
+      error?.status === 0 ||
+      error?.message?.includes('RESOURCE_EXHAUSTED') ||
+      error?.message?.includes('xhr error') ||
+      error?.message?.includes('Http response');
+
+    if (isRetryable && retries > 0) {
+      console.warn(`Retryable error encountered (${error?.status || 'unknown'}), retrying in ${delay}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
       return callAiWithRetry(apiCall, retries - 1, delay * 2);
     }
@@ -36,9 +43,16 @@ export async function* streamAiWithRetry<T>(
       yield* stream;
       return;
     } catch (error: any) {
-      const isRateLimited = error?.status === 429 || error?.message?.includes('RESOURCE_EXHAUSTED');
-      if (isRateLimited && currentRetries > 0) {
-        console.warn(`Quota exceeded during stream, retrying in ${currentDelay}ms...`);
+      const isRetryable = 
+        error?.status === 429 || 
+        error?.status === 500 || 
+        error?.status === 0 ||
+        error?.message?.includes('RESOURCE_EXHAUSTED') ||
+        error?.message?.includes('xhr error') ||
+        error?.message?.includes('Http response');
+
+      if (isRetryable && currentRetries > 0) {
+        console.warn(`Retryable error encountered during stream (${error?.status || 'unknown'}), retrying in ${currentDelay}ms...`);
         await new Promise(resolve => setTimeout(resolve, currentDelay));
         currentRetries--;
         currentDelay *= 2;

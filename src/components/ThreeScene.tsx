@@ -2,61 +2,56 @@ import React, { useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-const ThreeScene: React.FC<{ prompt: string }> = ({ prompt }) => {
+const ThreeScene: React.FC<{ prompt: string, mode: 'sketch' | 'real', onStatusUpdate: (status: string) => void }> = ({ prompt, mode, onStatusUpdate }) => {
   const mountRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const currentMount = mountRef.current;
     if (!currentMount) return;
 
-    console.log("Rendering 3D object based on prompt:", prompt);
+    onStatusUpdate(`Mhiee is summoning the ${prompt} from the imaginary world...`);
 
-    // Scene setup
+    // SCENE SETUP (Narrative: Dark void background for both)
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf0f0f0); // Soft background color
+    scene.background = new THREE.Color(0x050505); 
+
+    // ... (rest of the logic) ...
+
+    onStatusUpdate(`The ${prompt} has materialized in ${mode} mode.`);
+    
+    // ... animation loop ...
 
     const camera = new THREE.PerspectiveCamera(75, currentMount.clientWidth / currentMount.clientHeight, 0.1, 1000);
     camera.position.set(3, 3, 5);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     currentMount.appendChild(renderer.domElement);
 
-    // Controls
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
+    
+    // ENGINEERING PARTS (Part-based coloring demo)
+    const materialProp = mode === 'sketch' 
+        ? { color: 0x000000, wireframe: true } 
+        : { color: 0x555555, metalness: 0.8, roughness: 0.2 };
 
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-    scene.add(ambientLight);
+    // Body
+    const bodyGeo = new THREE.BoxGeometry(2, 1, 1);
+    const body = new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial(materialProp));
+    scene.add(body);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(5, 5, 5);
-    directionalLight.castShadow = true;
-    scene.add(directionalLight);
+    // Part (e.g., engine block)
+    const partGeo = new THREE.SphereGeometry(0.5);
+    const part = new THREE.Mesh(partGeo, new THREE.MeshStandardMaterial({ ...materialProp, color: 0xff0000 }));
+    part.position.set(0, 1, 0);
+    scene.add(part);
 
-    // Cube
-    const geometry = new THREE.BoxGeometry(2, 2, 2);
-    const color = prompt.toLowerCase().includes('red') ? 0xff0000 : 
-                  prompt.toLowerCase().includes('blue') ? 0x0000ff : 0x0077ff;
-    const material = new THREE.MeshStandardMaterial({ 
-      color: color, 
-      metalness: 0.7, 
-      roughness: 0.2 
-    });
-    const cube = new THREE.Mesh(geometry, material);
-    cube.castShadow = true;
-    cube.receiveShadow = true;
-    cube.position.y = 1;
-    scene.add(cube);
+    // Light
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(5, 5, 5);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-    // GridHelper
-    const gridHelper = new THREE.GridHelper(10, 10);
-    scene.add(gridHelper);
-
-    // Animation
     const animate = () => {
       requestAnimationFrame(animate);
       controls.update();
@@ -64,15 +59,11 @@ const ThreeScene: React.FC<{ prompt: string }> = ({ prompt }) => {
     };
     animate();
 
-    // Cleanup
     return () => {
       currentMount.removeChild(renderer.domElement);
-      geometry.dispose();
-      material.dispose();
       renderer.dispose();
-      controls.dispose();
     };
-  }, []);
+  }, [prompt, mode]);
 
   return <div ref={mountRef} className="w-full h-full" />;
 };

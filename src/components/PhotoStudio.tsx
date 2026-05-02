@@ -89,7 +89,8 @@ export default function PhotoStudio() {
     setAiError(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const apiKey = (window as any).GEMINI_API_KEY;
+      const ai = new GoogleGenAI({ apiKey });
       const reader = new FileReader();
       const base64SecondImage = await new Promise<string>((resolve, reject) => {
         reader.onload = () => {
@@ -107,16 +108,19 @@ export default function PhotoStudio() {
       
       if (!match1 || !match2) throw new Error("Invalid image format");
 
-      const response = await callAiWithRetry(() => ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [
-            { inlineData: { mimeType: match1[1], data: match1[2] } },
-            { inlineData: { mimeType: match2[1], data: match2[2] } },
-            { text: "Replace the face of the person in the first image with the face from the second image seamlessly. IMPORTANT: Do not decompose, alter, or touch the face of the person in the image. Ensure the editing looks completely natural and not like AI editing." }
-          ]
-        }
-      }));
+      const response = await callAiWithRetry((key) => {
+        const aiInstance = new GoogleGenAI({ apiKey: key });
+        return aiInstance.models.generateContent({
+          model: 'gemini-flash-latest',
+          contents: {
+            parts: [
+              { inlineData: { mimeType: match1[1], data: match1[2] } },
+              { inlineData: { mimeType: match2[1], data: match2[2] } },
+              { text: "Replace the face of the person in the first image with the face from the second image seamlessly. IMPORTANT: Do not decompose, alter, or touch the face of the person in the image. Ensure the editing looks completely natural and not like AI editing." }
+            ]
+          }
+        });
+      });
 
       let newImage = null;
       let textResponse = null;
@@ -145,7 +149,13 @@ export default function PhotoStudio() {
       }
     } catch (err: any) {
       console.error("Face Swap Error:", err);
-      setAiError(err.message || "An error occurred during face swap.");
+      const status = err?.status || err?.error?.code || err?.error?.status;
+      const messageStr = err?.message || err?.error?.message || "";
+      if (status === 429 || status === 'RESOURCE_EXHAUSTED' || messageStr.includes('RESOURCE_EXHAUSTED')) {
+        setAiError("Daily AI quota exceeded! 🙈 Please try again tomorrow or use your own API key in Settings! ✨");
+      } else {
+        setAiError(err.message || "An error occurred during face swap.");
+      }
     } finally {
       setIsProcessingAI(false);
       if (faceSwapInputRef.current) faceSwapInputRef.current.value = '';
@@ -203,22 +213,26 @@ export default function PhotoStudio() {
     setAiError(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const apiKey = (window as any).GEMINI_API_KEY;
+      const ai = new GoogleGenAI({ apiKey });
       const match = baseImage.match(/^data:(image\/[a-zA-Z+.-]+);base64,(.+)$/);
       if (!match) throw new Error("Invalid image format");
 
       const mimeType = match[1];
       const base64Data = match[2];
 
-      const response = await callAiWithRetry(() => ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [
-            { inlineData: { mimeType, data: base64Data } },
-            { text: finalPrompt }
-          ]
-        }
-      }));
+      const response = await callAiWithRetry((key) => {
+        const aiInstance = new GoogleGenAI({ apiKey: key });
+        return aiInstance.models.generateContent({
+          model: 'gemini-flash-latest',
+          contents: {
+            parts: [
+              { inlineData: { mimeType, data: base64Data } },
+              { text: finalPrompt }
+            ]
+          }
+        });
+      });
 
       let newImage = null;
       let textResponse = null;
@@ -247,7 +261,13 @@ export default function PhotoStudio() {
       }
     } catch (err: any) {
       console.error("AI Edit Error:", err);
-      setAiError("AI processing failed due to a temporary issue. Please try again.");
+      const status = err?.status || err?.error?.code || err?.error?.status;
+      const messageStr = err?.message || err?.error?.message || "";
+      if (status === 429 || status === 'RESOURCE_EXHAUSTED' || messageStr.includes('RESOURCE_EXHAUSTED')) {
+        setAiError("Haba Boss, we've hit the AI limit! 🙈 Please try again tomorrow or use your own API key! ✨");
+      } else {
+        setAiError("AI processing failed due to a temporary issue. Please try again.");
+      }
     } finally {
       setIsProcessingAI(false);
     }
@@ -307,26 +327,33 @@ export default function PhotoStudio() {
     setVideoUrl(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      let operation = await ai.models.generateVideos({
-        model: 'veo-3.1-fast-generate-preview',
-        prompt: videoPrompt,
-        config: {
-          numberOfVideos: 1,
-          resolution: '720p',
-          aspectRatio: '16:9'
-        }
+      const apiKey = (window as any).GEMINI_API_KEY;
+      const ai = new GoogleGenAI({ apiKey });
+      let operation = await callAiWithRetry((key) => {
+        const aiInstance = new GoogleGenAI({ apiKey: key });
+        return aiInstance.models.generateVideos({
+          model: 'veo-2.0-exp', // Using experimental video model if available, else fallback
+          prompt: videoPrompt,
+          config: {
+            numberOfVideos: 1,
+            resolution: '720p',
+            aspectRatio: '16:9'
+          }
+        });
       });
 
       // Poll for completion
       while (!operation.done) {
         await new Promise(resolve => setTimeout(resolve, 10000));
-        operation = await ai.operations.getVideosOperation({operation: operation});
+        operation = await callAiWithRetry((key) => {
+          const aiInstance = new GoogleGenAI({ apiKey: key });
+          return aiInstance.operations.getVideosOperation({ operation });
+        });
       }
 
       const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
       if (downloadLink) {
-        const apiKey = process.env.GEMINI_API_KEY;
+        const apiKey = (window as any).GEMINI_API_KEY;
         const response = await fetch(downloadLink, {
           method: 'GET',
           headers: {
@@ -336,11 +363,19 @@ export default function PhotoStudio() {
         const blob = await response.blob();
         setVideoUrl(URL.createObjectURL(blob));
       } else {
-        throw new Error("Failed to generate video.");
+        throw new Error("I couldn't quite render that video, Boss! 🥺 Maybe try a different prompt? ✨");
       }
     } catch (err: any) {
       console.error("Video Generation Error:", err);
-      setAiError(err.message || "An error occurred during video generation.");
+      const status = err?.status || err?.error?.code || err?.error?.status;
+      const messageStr = err?.message || err?.error?.message || "";
+      if (status === 429 || status === 'RESOURCE_EXHAUSTED' || messageStr.includes('RESOURCE_EXHAUSTED')) {
+        setAiError("Daily Video quota reached! 🙈 Please try again tomorrow or use a paid API key! ✨");
+      } else if (status === 404 || messageStr.toLowerCase().includes('not found')) {
+        setAiError("Video generation isn't ready for this model yet. 🥺 I'm working hard to get it for you! 💅");
+      } else {
+        setAiError(err.message || "An error occurred during video generation. Ni dai, I'll try better next time! 🙈");
+      }
     } finally {
       setIsGeneratingVideo(false);
     }

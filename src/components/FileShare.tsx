@@ -207,36 +207,40 @@ export default function FileShare() {
 
     channel.onmessage = (event) => {
       if (typeof event.data === 'string') {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'meta') {
-          setIncomingFileMeta({ name: msg.name, size: msg.size, type: msg.fileType });
-          receiveBufferRef.current = [];
-          receivedSizeRef.current = 0;
-          setIsTransferring(true);
-          setTransferProgress(0);
-          setTransferComplete(false);
-          setStatus(`Receiving file: ${msg.name}...`);
-          startTimeRef.current = Date.now();
-          setEstimatedTime(null);
-        } else if (msg.type === 'eof') {
-          // File transfer complete
-          const meta = incomingFileMetaRef.current;
-          const blob = new Blob(receiveBufferRef.current, { type: meta?.type || 'application/octet-stream' });
-          const url = URL.createObjectURL(blob);
-          
-          // Trigger download
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = meta?.name || 'downloaded-file';
-          a.click();
-          
-          receiveBufferRef.current = [];
-          setIsTransferring(false);
-          setTransferProgress(100);
-          setTransferComplete(true);
-          setStatus('File received successfully!');
-          
-          setTimeout(() => URL.revokeObjectURL(url), 10000);
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'meta') {
+            setIncomingFileMeta({ name: msg.name, size: msg.size, type: msg.fileType });
+            receiveBufferRef.current = [];
+            receivedSizeRef.current = 0;
+            setIsTransferring(true);
+            setTransferProgress(0);
+            setTransferComplete(false);
+            setStatus(`Receiving file: ${msg.name}...`);
+            startTimeRef.current = Date.now();
+            setEstimatedTime(null);
+          } else if (msg.type === 'eof') {
+            // File transfer complete
+            const meta = incomingFileMetaRef.current;
+            const blob = new Blob(receiveBufferRef.current, { type: meta?.type || 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            
+            // Trigger download
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = meta?.name || 'downloaded-file';
+            a.click();
+            
+            receiveBufferRef.current = [];
+            setIsTransferring(false);
+            setTransferProgress(100);
+            setTransferComplete(true);
+            setStatus('File received successfully!');
+            
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+          }
+        } catch (e) {
+          console.error("Error parsing DataChannel message:", e);
         }
       } else {
         // Receiving binary chunk

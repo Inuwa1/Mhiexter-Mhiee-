@@ -1,21 +1,22 @@
 {
   "entities": {
-    "User": {
-      "title": "User",
-      "description": "A user of the application.",
+    "Memory": {
+      "title": "Memory",
+      "description": "A stored insight, code trick, or conversation summary.",
       "type": "object",
       "properties": {
-        "uid": { "type": "string", "description": "The Firebase Auth UID." },
-        "email": { "type": "string", "format": "email", "description": "The user's email address." },
-        "displayName": { "type": "string", "description": "The user's display name." }
+        "uid": { "type": "string", "description": "User ID" },
+        "content": { "type": "string", "description": "The stored knowledge content" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "tags": { "type": "array", "description": "Array of tags" }
       },
-      "required": ["uid", "email"]
+      "required": ["uid", "content", "createdAt"]
     }
   },
   "firestore": {
-    "/users/{userId}": {
-      "schema": { "$ref": "User" },
-      "description": "User profiles."
+    "/memories/{memoryId}": {
+      "schema": "Memory",
+      "description": "User insights and knowledge base"
     }
   }
 }

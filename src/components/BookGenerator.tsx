@@ -49,47 +49,71 @@ export default function BookGenerator() {
 
   useEffect(() => {
     const savedHistory = localStorage.getItem('bookHistory');
-    if (savedHistory) setHistory(JSON.parse(savedHistory));
+    if (savedHistory) {
+      try {
+        setHistory(JSON.parse(savedHistory));
+      } catch (e) {
+        console.error("Error parsing book history:", e);
+        setHistory([]);
+      }
+    }
   }, []);
 
   const saveToHistory = (book: Book) => {
     const newHistory = [book, ...history.filter(h => h.id !== book.id)];
     setHistory(newHistory);
-    localStorage.setItem('bookHistory', JSON.stringify(newHistory));
+    try {
+      localStorage.setItem('bookHistory', JSON.stringify(newHistory));
+    } catch (e) {
+      console.error("Failed to save book history to localStorage:", e);
+    }
   };
 
   const generateOutline = async () => {
     if (!topic) return;
     setIsGenerating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await callAiWithRetry(() => ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
-        contents: `Create an outline for a comprehensive, long-form book about: ${topic}. Include a title and a list of 20 detailed chapter titles. Return JSON with title and chapterTitles (array of strings).`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              chapterTitles: { type: Type.ARRAY, items: { type: Type.STRING } }
-            },
-            required: ["title", "chapterTitles"]
+      const apiKey = (window as any).GEMINI_API_KEY;
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await callAiWithRetry((key) => {
+        const aiInstance = new GoogleGenAI({ apiKey: key });
+        return aiInstance.models.generateContent({
+          model: 'gemini-1.5-pro',
+          contents: `Create an outline for a comprehensive, long-form book about: ${topic}. Include a title and a list of 20 detailed chapter titles. Return JSON with title and chapterTitles (array of strings).`,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                chapterTitles: { type: Type.ARRAY, items: { type: Type.STRING } }
+              },
+              required: ["title", "chapterTitles"]
+            }
           }
-        }
-      }));
-      const data = JSON.parse(response.text!);
-      const newBook: Book = {
-        id: Date.now().toString(),
-        title: data.title,
-        chapters: data.chapterTitles.map((title: string) => ({ title, content: '', status: 'pending' })),
-        font: 'Helvetica',
-        titleUppercase: false
-      };
-      setCurrentBook(newBook);
-      saveToHistory(newBook);
-      setSelectedChapters([]);
-    } catch (error) { console.error(error); } finally { setIsGenerating(false); }
+        });
+      });
+      try {
+        const data = JSON.parse(response.text!);
+        const newBook: Book = {
+          id: Date.now().toString(),
+          title: data.title,
+          chapters: data.chapterTitles.map((title: string) => ({ title, content: '', status: 'pending' })),
+          font: 'Helvetica',
+          titleUppercase: false
+        };
+        setCurrentBook(newBook);
+        saveToHistory(newBook);
+        setSelectedChapters([]);
+      } catch (parseError) {
+        console.error("JSON parse error for outline:", parseError);
+        alert("Haba Boss, I made a little mistake in the JSON! 🙈 Trying a simpler way for you... ✨");
+        // Fallback or re-try could go here
+      }
+    } catch (error) { 
+        console.error(error); 
+        alert("Ni dai, I couldn't get that outline ready! 🥺 Please check your connection or try again. ✨");
+    } finally { setIsGenerating(false); }
   };
 
   const generateChapter = async (index: number, book: Book): Promise<Book> => {
@@ -99,23 +123,37 @@ export default function BookGenerator() {
     setCurrentBook(newBook);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const stream = await streamAiWithRetry(async () => ai.models.generateContentStream({
-        model: 'gemini-3.1-pro-preview',
-        contents: `Write a very detailed, long chapter for the book "${newBook.title}". Chapter title: "${newBook.chapters[index].title}". Provide at least 5000 words for this chapter.`,
-        config: { thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } }
-      }));
+      const apiKey = (window as any).GEMINI_API_KEY;
+      const ai = new GoogleGenAI({ apiKey });
+      const streamResult = streamAiWithRetry<any>(async (apiKey) => {
+        const ai = new GoogleGenAI({ apiKey });
+        const res = await ai.models.generateContentStream({
+          model: 'gemini-1.5-pro',
+          contents: `Write a very detailed, long chapter for the book "${newBook.title}". Chapter title: "${newBook.chapters[index].title}". Provide at least 5000 words for this chapter.`,
+          config: { }
+        });
+        return (res as any).stream || res;
+      });
       
       let fullContent = '';
-      for await (const chunk of stream) {
-        fullContent += chunk.text;
+      for await (const chunk of streamResult) {
+        const text = (chunk as any).text;
+        fullContent += text || '';
         newBook.chapters[index].content = fullContent;
         setCurrentBook({ ...newBook });
       }
       
       newBook.chapters[index].status = 'done';
-    } catch (error) { 
+    } catch (error: any) { 
       console.error(error); 
+      const status = error?.status || error?.error?.code || error?.error?.status;
+      const messageStr = error?.message || error?.error?.message || "";
+      
+      let errorToast = "Failed to generate chapter. Please try again.";
+      if (status === 429 || status === 'RESOURCE_EXHAUSTED' || messageStr.includes('RESOURCE_EXHAUSTED')) {
+        errorToast = "Quota exceeded! Please try again tomorrow or use your own API key. ✨";
+      }
+      alert(errorToast);
       newBook.chapters[index].status = 'pending'; 
     }
     setCurrentBook(newBook);

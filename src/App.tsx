@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import FileShare from './components/FileShare';
 import MhieeBrowser from './components/MhieeBrowser';
 import VoiceChat from './components/VoiceChat';
+import PhotoStudio from './components/PhotoStudio';
 
 export default function App() {
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
@@ -44,6 +45,9 @@ export default function App() {
           setKeyError("API key is missing on the server. Please check the environment configuration.");
         } else {
           (window as any).GEMINI_API_KEY = data.GEMINI_API_KEY;
+          if (data.ELEVENLABS_VOICE_ID && !localStorage.getItem('selectedVoiceId')) {
+            localStorage.setItem('selectedVoiceId', data.ELEVENLABS_VOICE_ID);
+          }
           setIsKeyLoaded(true);
         }
       } catch (err: any) {
@@ -625,7 +629,7 @@ export default function App() {
         )}
         </div>
       ) : (
-        <div className="text-zinc-500">Editor Layout Not Available</div>
+        <PhotoStudio />
       )}
     </div>
   );

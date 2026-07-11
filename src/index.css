@@ -1,17 +1,10 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
-.markdown-body h1 { @apply text-2xl font-bold mt-8 mb-6 text-white; }
-.markdown-body h2 { @apply text-xl font-bold mt-7 mb-5 text-white; }
-.markdown-body h3 { @apply text-lg font-bold mt-6 mb-4 text-white; }
-.markdown-body p { @apply mb-6 leading-relaxed text-zinc-300; }
-.markdown-body ul { @apply list-disc pl-5 mb-6 space-y-2 text-zinc-300; }
-.markdown-body ol { @apply list-decimal pl-5 mb-6 space-y-2 text-zinc-300; }
-.markdown-body code { @apply bg-zinc-800 px-1.5 py-0.5 rounded text-sm font-mono text-indigo-300; }
-.markdown-body pre { @apply bg-zinc-900 border border-zinc-800 p-4 rounded-xl overflow-x-auto mb-4; }
-.markdown-body pre code { @apply bg-transparent p-0 text-zinc-300; }
-.markdown-body a { @apply text-indigo-400 hover:underline; }
-.markdown-body blockquote { @apply border-l-4 border-indigo-500 pl-4 italic text-zinc-400 mb-4; }
-.markdown-body hr { @apply border-t border-zinc-800 my-8; }
+/* KaTeX is imported in the component, but we can also add global overrides here if needed */
+.katex-display {
+  @apply my-6 overflow-x-auto overflow-y-hidden py-2;
+}
 
 @theme {
   --animate-gradient-x: gradient-x 6s ease infinite;

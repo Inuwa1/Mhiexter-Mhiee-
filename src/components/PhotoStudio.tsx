@@ -8,7 +8,13 @@ import { callAiWithRetry } from '../lib/aiUtils';
 
 // const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-export default function PhotoStudio() {
+import { SelectionFile } from '../types';
+
+interface PhotoStudioProps {
+  onShare?: (file: SelectionFile) => void;
+}
+
+export default function PhotoStudio({ onShare }: PhotoStudioProps) {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [imageName, setImageName] = useState<string | null>(null);
   const [brightness, setBrightness] = useState(100);
@@ -580,10 +586,25 @@ export default function PhotoStudio() {
               </button>
               <button 
                 onClick={handleDownload}
-                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-colors shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
+                className="w-full py-2.5 px-4 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
               >
                 <Download className="w-4 h-4" />
                 Export Image
+              </button>
+              <button 
+                onClick={() => {
+                  if (onShare && imageSrc) {
+                    onShare({
+                      name: imageName || 'edited_photo.png',
+                      type: 'image/png',
+                      data: previewImageSrc || imageSrc
+                    });
+                  }
+                }}
+                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-colors shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
+                Share to Chat
               </button>
             </div>
           </div>

@@ -1,42 +1,218 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Mic, MicOff, X, Sparkles, Volume2, Globe, Settings2, Waves } from 'lucide-react';
+import { 
+  Mic, 
+  MicOff, 
+  X, 
+  Sparkles, 
+  Volume2, 
+  Globe, 
+  Settings2, 
+  Waves, 
+  Power, 
+  VolumeX, 
+  Terminal, 
+  Ear,
+  Loader,
+  Wifi,
+  WifiOff
+} from 'lucide-react';
 import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type, ThinkingLevel } from '@google/genai';
 import { motion, AnimatePresence } from 'motion/react';
 
-const GeminiOrb = ({ isActive, isThinking }: { isActive: boolean, isThinking: boolean }) => {
+// Static Language definitions
+const LANGUAGES = [
+  { code: 'ha-NG', name: 'Hausa (Najeriya)', native: 'Harshen Hausa' },
+  { code: 'en-US', name: 'English (United States)', native: 'English (US)' },
+  { code: 'ar-SA', name: 'Arabic (Saudi Arabia)', native: 'العربية' },
+  { code: 'pcm-NG', name: 'Nigerian Pidgin', native: 'Pidgin English' },
+  { code: 'sw-KE', name: 'Swahili (East Africa)', native: 'Kiswahili' },
+  { code: 'fr-FR', name: 'French (France)', native: 'Français' },
+  { code: 'es-ES', name: 'Spanish (Spain)', native: 'Español' },
+  { code: 'pt-BR', name: 'Portuguese (Brazil)', native: 'Português' },
+  { code: 'de-DE', name: 'German (Germany)', native: 'Deutsch' },
+  { code: 'hi-IN', name: 'Hindi (India)', native: 'हिन्दी' },
+  { code: 'ur-PK', name: 'Urdu (Pakistan)', native: 'اردو' },
+  { code: 'zh-CN', name: 'Chinese (Simplified)', native: '简体中文' },
+  { code: 'ja-JP', name: 'Japanese (Japan)', native: '日本語' },
+];
+
+/**
+ * Custom Web Audio Synth Beep Engine
+ * Generates beautiful futuristic, cybernetic tone alerts
+ */
+const playAudioTone = (type: 'activate' | 'success' | 'warning' | 'deactivate') => {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    
+    osc1.connect(gainNode);
+    osc2.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    
+    const now = ctx.currentTime;
+    
+    if (type === 'activate') {
+      // Sleek double synth pulse (futuristic rising wake tone)
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(520, now);
+      osc1.frequency.exponentialRampToValueAtTime(880, now + 0.12);
+      
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(260, now);
+      osc2.frequency.exponentialRampToValueAtTime(440, now + 0.12);
+      
+      gainNode.gain.setValueAtTime(0, now);
+      gainNode.gain.linearRampToValueAtTime(0.08, now + 0.04);
+      gainNode.gain.linearRampToValueAtTime(0, now + 0.2);
+      
+      osc1.start(now);
+      osc2.start(now);
+      osc1.stop(now + 0.22);
+      osc2.stop(now + 0.22);
+    } else if (type === 'success') {
+      // Confirmed cyber-chime
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(660, now);
+      osc1.frequency.setValueAtTime(990, now + 0.08);
+      
+      gainNode.gain.setValueAtTime(0, now);
+      gainNode.gain.linearRampToValueAtTime(0.06, now + 0.04);
+      gainNode.gain.linearRampToValueAtTime(0, now + 0.25);
+      
+      osc1.start(now);
+      osc1.stop(now + 0.25);
+    } else if (type === 'deactivate') {
+      // Falling synth power down drone
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(440, now);
+      osc1.frequency.exponentialRampToValueAtTime(110, now + 0.25);
+      
+      gainNode.gain.setValueAtTime(0.06, now);
+      gainNode.gain.linearRampToValueAtTime(0, now + 0.3);
+      
+      osc1.start(now);
+      osc1.stop(now + 0.3);
+    } else if (type === 'warning') {
+      // Diagnostic alert chirp
+      osc1.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(160, now);
+      osc1.frequency.linearRampToValueAtTime(130, now + 0.3);
+      
+      gainNode.gain.setValueAtTime(0.08, now);
+      gainNode.gain.linearRampToValueAtTime(0, now + 0.3);
+      
+      osc1.start(now);
+      osc1.stop(now + 0.3);
+    }
+  } catch (e) {
+    console.warn("Web audio context start bypassed gracefully:", e);
+  }
+};
+
+/**
+ * Sanitizes and speaks text using browser text-to-speech API
+ * Adheres to identity guidelines: plain-text only, strips emojis + markdown for ElevenLabs
+ */
+const speakOfflineText = (text: string, langCode: string = 'en-US') => {
+  if (!('speechSynthesis' in window)) return;
+  
+  // Sanitize text: strip markdown characters and emojis fully
+  let cleanText = text
+    .replace(/\*\*|__|\*|_|#/g, '') 
+    .replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, "") 
+    .trim();
+    
+  try {
+    window.speechSynthesis.cancel(); // Interrupt instantly
+    
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.lang = langCode;
+    
+    // Attempt to locate a warm, expressive voice match
+    const voices = window.speechSynthesis.getVoices();
+    const voiceCandidate = voices.find(v => 
+      v.lang.startsWith(langCode.substring(0, 2)) && 
+      (v.name.toLowerCase().includes('female') || 
+       v.name.toLowerCase().includes('zira') || 
+       v.name.toLowerCase().includes('samantha') || 
+       v.name.toLowerCase().includes('google'))
+    ) || voices.find(v => v.lang.startsWith(langCode.substring(0, 2)));
+    
+    if (voiceCandidate) {
+      utterance.voice = voiceCandidate;
+    }
+    
+    utterance.pitch = 1.15; // Set slightly higher pitch for playful feminine dialog aura
+    utterance.rate = 1.05;  // Energetic pace
+    
+    window.speechSynthesis.speak(utterance);
+  } catch (err) {
+    console.warn("Offline TTS failed to speak raw buffer:", err);
+  }
+};
+
+const GeminiOrb = ({ 
+  isActive, 
+  isThinking, 
+  isStandby 
+}: { 
+  isActive: boolean, 
+  isThinking: boolean, 
+  isStandby: boolean 
+}) => {
   return (
     <div className="relative w-64 h-64 flex items-center justify-center">
-      {/* Outer Glows */}
+      {/* Dynamic Halo rings based on mode */}
       <motion.div 
         animate={{ 
-          scale: isActive ? [1, 1.2, 1] : 1,
-          opacity: isActive ? [0.3, 0.6, 0.3] : 0.2,
+          scale: isActive ? [1, 1.2, 1] : isStandby ? [1, 1.1, 1] : 1,
+          opacity: isActive ? [0.3, 0.6, 0.3] : isStandby ? [0.15, 0.3, 0.15] : 0.1,
           rotate: [0, 180, 360]
         }}
         transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
-        className="absolute inset-0 bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 rounded-full blur-3xl"
+        className={`absolute inset-0 rounded-full blur-3xl ${
+          isActive 
+            ? "bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500" 
+            : isStandby 
+              ? "bg-gradient-to-tr from-teal-500 via-indigo-500/30 to-emerald-500/10" 
+              : "bg-gradient-to-tr from-zinc-800 to-transparent"
+        }`}
       />
       
       <motion.div 
         animate={{ 
-          scale: isActive ? [1.1, 0.9, 1.1] : 1,
-          opacity: isActive ? [0.2, 0.4, 0.2] : 0.1,
+          scale: isActive ? [1.1, 0.9, 1.1] : isStandby ? [1.05, 0.95, 1.05] : 1,
+          opacity: isActive ? [0.2, 0.4, 0.2] : isStandby ? [0.1, 0.25, 0.1] : 0.05,
           rotate: [360, 180, 0]
         }}
         transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-        className="absolute inset-0 bg-gradient-to-bl from-blue-400 via-teal-400 to-indigo-600 rounded-full blur-2xl"
+        className={`absolute inset-0 rounded-full blur-2xl ${
+          isActive 
+            ? "bg-gradient-to-bl from-blue-400 via-teal-400 to-indigo-600" 
+            : isStandby 
+              ? "bg-gradient-to-bl from-emerald-400/20 via-teal-400/25 to-transparent" 
+              : "bg-transparent"
+        }`}
       />
 
-      {/* The Core Orb */}
+      {/* Main Core Orb */}
       <motion.div 
         animate={{ 
-          scale: isActive ? [1, 1.05, 1] : 1,
+          scale: isActive ? [1, 1.04, 1] : isStandby ? [1, 1.02, 1] : 1,
           boxShadow: isActive 
-            ? ["0 0-20px rgba(99,102,241,0.4)", "0 0-40px rgba(168,85,247,0.6)", "0 0-20px rgba(99,102,241,0.4)"]
-            : "0 0 0px rgba(0,0,0,0)"
+            ? ["0 0 20px rgba(99,102,241,0.3)", "0 0 40px rgba(168,85,247,0.5)", "0 0 20px rgba(99,102,241,0.3)"]
+            : isStandby
+              ? ["0 0 15px rgba(20,184,166,0.2)", "0 0 30px rgba(99,102,241,0.3)", "0 0 15px rgba(20,184,166,0.2)"]
+              : "0 0 0px rgba(0,0,0,0)"
         }}
         transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-        className="relative z-10 w-48 h-48 bg-zinc-900 rounded-full border border-white/10 flex items-center justify-center overflow-hidden"
+        className={`relative z-10 w-48 h-48 bg-zinc-900 rounded-full border flex items-center justify-center overflow-hidden transition-colors duration-700 ${
+          isStandby ? 'border-teal-500/20' : 'border-white/10'
+        }`}
       >
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.1)_0%,transparent_60%)]" />
         
@@ -47,32 +223,47 @@ const GeminiOrb = ({ isActive, isThinking }: { isActive: boolean, isThinking: bo
               initial={{ opacity: 0, scale: 0.5 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.8 }}
+              className="absolute inset-0 flex items-center justify-center animate-pulse"
+            >
+              <div className="w-full h-full bg-gradient-to-br from-indigo-500/20 via-purple-500/10 to-transparent rounded-full" />
+            </motion.div>
+          )}
+          {(!isActive && isStandby) && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               className="absolute inset-0 flex items-center justify-center"
             >
-              <div className="w-full h-full bg-gradient-to-br from-indigo-500/20 via-purple-500/20 to-transparent rounded-full animate-pulse" />
+              <div className="w-[85%] h-[85%] bg-gradient-to-br from-teal-500/5 via-emerald-500/5 to-transparent rounded-full animate-ping" style={{ animationDuration: '4s' }} />
             </motion.div>
           )}
         </AnimatePresence>
 
         {isThinking ? (
-           <div className="flex gap-1 items-center">
-             {[0, 1, 2].map((i) => (
-               <motion.div
-                 key={i}
-                 animate={{ scaleY: [1, 2, 1] }}
-                 transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
-                 className="w-1 h-4 bg-indigo-400 rounded-full"
-               />
-             ))}
-           </div>
+          <div className="flex gap-1.5 items-center">
+            {[0, 1, 2].map((i) => (
+              <motion.div
+                key={i}
+                animate={{ scaleY: [1, 2.2, 1] }}
+                transition={{ duration: 0.5, repeat: Infinity, delay: i * 0.12 }}
+                className="w-1 h-5 bg-indigo-400 rounded-full"
+              />
+            ))}
+          </div>
+        ) : isStandby ? (
+          <div className="flex flex-col items-center justify-center space-y-2 z-20">
+            <Ear className="w-10 h-10 text-teal-400 animate-pulse" />
+            <span className="text-[9px] font-mono tracking-widest text-teal-500 uppercase">STANDBY</span>
+          </div>
         ) : (
-          <Sparkles className={`w-12 h-12 ${isActive ? 'text-indigo-400' : 'text-zinc-700'} transition-colors duration-500`} />
+          <Sparkles className={`w-12 h-12 ${isActive ? 'text-indigo-400' : 'text-zinc-600'} transition-colors duration-500`} />
         )}
       </motion.div>
 
-      {/* Decorative Rings */}
-      <div className="absolute inset-x-[-20%] inset-y-[-20%] border border-white/5 rounded-full pointer-events-none" />
-      <div className="absolute inset-x-[-10%] inset-y-[-10%] border border-white/5 rounded-full pointer-events-none animate-[pulse_4s_infinite]" />
+      {/* Perimeter orbit decorations */}
+      <div className={`absolute inset-x-[-15%] inset-y-[-15%] border rounded-full pointer-events-none transition-colors duration-500 ${isStandby ? 'border-teal-500/5' : 'border-white/5'}`} />
+      <div className={`absolute inset-x-[-8%] inset-y-[-8%] border rounded-full pointer-events-none transition-colors duration-500 ${isStandby ? 'border-teal-500/5 animate-pulse' : 'border-white/5'}`} />
     </div>
   );
 };
@@ -82,19 +273,31 @@ export default function VoiceChat({
   onStartCamera, 
   onStopCamera, 
   onClearChat,
-  onClose
+  onClose,
+  onDeviceControl
 }: { 
   onToggle: (active: boolean) => void,
   onStartCamera: () => void,
   onStopCamera: () => void,
   onClearChat: () => void,
-  onClose?: () => void
+  onClose?: () => void,
+  onDeviceControl?: (action: string, target: string) => void
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isSingingModeRef = useRef(false);
   const [voice, setVoice] = useState('Kore');
+  
+  // Advanced State for Continuous Wake Word Monitoring, Fallback, and Languages
+  const [isStandbyActive, setIsStandbyActive] = useState(false);
+  const [selectedLangCode, setSelectedLangCode] = useState('en-US');
+  const [showLangDropdown, setShowLangDropdown] = useState(false);
+  const [customLangCode, setCustomLangCode] = useState('');
+  const [offlineStatusMessage, setOfflineStatusMessage] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [searchLangQuery, setSearchLangQuery] = useState('');
+
   const sessionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -102,7 +305,63 @@ export default function VoiceChat({
   const nextStartTimeRef = useRef<number>(0);
   const gainNodeRef = useRef<GainNode | null>(null);
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  
+  // Continuous Standby speech recognition reference
+  const standbyRecognitionRef = useRef<any>(null);
 
+  // Synchronize network state
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOffline(false);
+      setOfflineStatusMessage(null);
+    };
+    const handleOffline = () => {
+      setIsOffline(true);
+      if (isRecording) {
+        stopVoiceChat();
+      }
+      setOfflineStatusMessage("Disconnected! Entering offline command fallback... 📡");
+    };
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [isRecording]);
+
+  // Handle Standby Speech Recognition loops based on Standby or Live recording transitions
+  useEffect(() => {
+    if (isStandbyActive && !isRecording) {
+      startStandbyListening();
+    } else {
+      stopStandbyListening();
+    }
+    return () => {
+      stopStandbyListening();
+    };
+  }, [isStandbyActive, isRecording, selectedLangCode]);
+
+  // Pre-load voices locally inside browser
+  useEffect(() => {
+    if ('speechSynthesis' in window) {
+      // Warm up TTS
+      window.speechSynthesis.getVoices();
+    }
+  }, []);
+
+  // Filter languages list
+  const filteredLanguages = useMemo(() => {
+    if (!searchLangQuery) return LANGUAGES;
+    return LANGUAGES.filter(l => 
+      l.name.toLowerCase().includes(searchLangQuery.toLowerCase()) || 
+      l.code.toLowerCase().includes(searchLangQuery.toLowerCase()) ||
+      l.native.toLowerCase().includes(searchLangQuery.toLowerCase())
+    );
+  }, [searchLangQuery]);
+
+  // Function Declarations
   const singingModeTool: FunctionDeclaration = {
     name: "setSingingMode",
     description: "Set the singing mode for sleep and relaxation. When active, the AI will sing calming songs and should not be interrupted.",
@@ -141,12 +400,249 @@ export default function VoiceChat({
     parameters: { type: Type.OBJECT, properties: {} }
   };
 
+  const processImageTool: FunctionDeclaration = {
+    name: "process_image",
+    description: "Generate or create an image based on a description. Use this when the user asks to 'draw', 'zana min', 'generate image', or 'yi min hoton'.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        prompt: { type: Type.STRING, description: "The description of the image to generate." }
+      },
+      required: ["prompt"]
+    }
+  };
+
+  const deviceControlTool = {
+    name: "deviceControl",
+    description: "Control device features. Use this for 'open whatsapp', 'bude camera', 'turn on wifi' (opens settings), 'check battery', 'vibrate', etc.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        action: { type: Type.STRING, description: "The action to perform: 'open' (for apps/settings), 'vibrate', 'battery_check', 'toggle_flash'." },
+        target: { type: Type.STRING, description: "The app or setting name (e.g., 'whatsapp', 'wifi', 'data', 'bluetooth', 'camera'). Required if action is 'open'." }
+      },
+      required: ["action"]
+    }
+  };
+
+  /**
+   * Continuous standby mic wake checker using local SpeechRecognition
+   */
+  const startStandbyListening = () => {
+    try {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        console.warn("Speech recognition not supported in this browser profile.");
+        return;
+      }
+      
+      stopStandbyListening();
+      
+      const rec = new SpeechRecognition();
+      rec.continuous = true;
+      rec.interimResults = true; // High sensitivity snack-responses
+      rec.lang = selectedLangCode;
+      
+      rec.onstart = () => {
+        setOfflineStatusMessage(null);
+      };
+      
+      rec.onresult = (event: any) => {
+        let textResult = "";
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          textResult += event.results[i][0].transcript;
+        }
+        const phrase = textResult.toLowerCase().trim();
+        console.log("Wake detector buffer:", phrase);
+        
+        // Multi-dialect wake triggers ("Hey Mhiee", Hausa phonetics, and Arabic keywords)
+        const isWakeMatched = 
+          phrase.includes("hey mhiee") || 
+          phrase.includes("mhiee") || 
+          phrase.includes("mhi") || 
+          phrase.includes("hey mi") || 
+          phrase.includes("hey me") || 
+          phrase.includes("hi mi") || 
+          phrase.includes("hi me") || 
+          phrase.includes("ya mhi") || 
+          phrase.includes("ya mhiee") || 
+          phrase.includes("aimée") || 
+          phrase.includes("hey pierce") || 
+          phrase.includes("ya مهي") || 
+          phrase.includes("مهي");
+          
+        if (isWakeMatched) {
+          console.log("WAKING UP MHIEE ENGINE!");
+          rec.abort(); // Stop background standby
+          
+          playAudioTone('activate');
+          
+          // Greet based on net connection
+          if (navigator.onLine) {
+            let onlineGreeting = "Mhiexter Boss! I'm here. 💅✨ Ready when you are! What's our next task?";
+            if (selectedLangCode.startsWith('ha')) {
+              onlineGreeting = "Na ji ka Mhiexter Boss! Sannu da kokari! 🙈 Ina jiran ka.";
+            } else if (selectedLangCode.startsWith('ar')) {
+              onlineGreeting = "نعم يا مهندسي العزيز! أنا هنا لخدمتك دائماً. ✨";
+            }
+            
+            speakOfflineText(onlineGreeting, selectedLangCode);
+            setTimeout(() => {
+              startVoiceChat();
+            }, 1250);
+          } else {
+            // Trigger offline commands directly
+            let offlineGreeting = "Sannu Boss! Online muke fita, amma Mhiee tana jiran umarnin offline! 🥺 Say 'open camera' or 'time'!";
+            if (selectedLangCode.startsWith('en')) {
+              offlineGreeting = "Mhiexter Boss! We are offline, but my brain's mechatronics offline commands are fully active. Fada min 'bude lab' or 'open camera'!";
+            } else if (selectedLangCode.startsWith('ar')) {
+              offlineGreeting = "أهلاً بك! نحن خارج الشبكة الآن، ولكن الأوامر المحلية تعمل بنجاح. ✨";
+            }
+            
+            speakOfflineText(offlineGreeting, selectedLangCode);
+            setTimeout(() => {
+              startOfflineListeningLoop();
+            }, 1800);
+          }
+        }
+      };
+      
+      rec.onerror = (e: any) => {
+        console.warn("Standby listener error encountered gracefully:", e.error);
+        if (e.error === 'not-allowed') {
+          setIsStandbyActive(false);
+          setError("Microphone permission was denied.");
+        }
+      };
+      
+      rec.onend = () => {
+        // Recycle listener for continuous wake capability
+        if (isStandbyActive && !isRecording) {
+          try { rec.start(); } catch(e) {}
+        }
+      };
+      
+      standbyRecognitionRef.current = rec;
+      rec.start();
+    } catch (err) {
+      console.error("Local standby listening setup exception:", err);
+    }
+  };
+
+  /**
+   * Kill standby speech threads
+   */
+  const stopStandbyListening = () => {
+    if (standbyRecognitionRef.current) {
+      try {
+        standbyRecognitionRef.current.onend = null;
+        standbyRecognitionRef.current.abort();
+      } catch (e) {}
+      standbyRecognitionRef.current = null;
+    }
+  };
+
+  /**
+   * Offline interactive dialogue and parser loop
+   */
+  const startOfflineListeningLoop = () => {
+    try {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) return;
+      
+      stopStandbyListening();
+      
+      const offlineRec = new SpeechRecognition();
+      offlineRec.continuous = false;
+      offlineRec.interimResults = false;
+      offlineRec.lang = selectedLangCode;
+      
+      offlineRec.onstart = () => {
+        setOfflineStatusMessage("Listening for localized voice commands...");
+      };
+      
+      offlineRec.onresult = (event: any) => {
+        const cmd = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
+        console.log("Offline pipeline matched speech text:", cmd);
+        
+        // 1. Mechatronics Lab Launcher
+        if (cmd.includes("mechatronics") || cmd.includes("lab") || cmd.includes("bude lab") || cmd.includes("robotics")) {
+          if (onDeviceControl) onDeviceControl("open", "mechatronics_lab");
+          playAudioTone('success');
+          speakOfflineText("Launching ADUSTECH mechatronics sandbox immediately, Engineer Boss! ✨ Let's analyze torque dynamics! 📡", selectedLangCode);
+        }
+        // 2. Camera Trigger
+        else if (cmd.includes("open camera") || cmd.includes("bude camera") || cmd.includes("start camera") || cmd.includes("kyamara")) {
+          onStartCamera();
+          playAudioTone('success');
+          speakOfflineText("Camera module initialized locally! Aka yi aka gama Boss! 💅✨", selectedLangCode);
+        } else if (cmd.includes("stop camera") || cmd.includes("kashe camera") || cmd.includes("close camera")) {
+          onStopCamera();
+          playAudioTone('success');
+          speakOfflineText("Shutting down live camera lens input feed, Boss.", selectedLangCode);
+        }
+        // 3. Clear session
+        else if (cmd.includes("clear") || cmd.includes("goge") || cmd.includes("goge chat")) {
+          onClearChat();
+          playAudioTone('success');
+          speakOfflineText("Vault sweeps finished! All history has been cleared safely! 🧹", selectedLangCode);
+        }
+        // 4. Time teller
+        else if (cmd.includes("time") || cmd.includes("lokaci") || cmd.includes("karfe nawa")) {
+          const now = new Date();
+          const hr = now.getHours();
+          const mn = now.getMinutes();
+          const localString = `The current local time is ${now.toLocaleTimeString()}. Toh Boss, karfe ${hr} da minti ${mn} ne yanzu! ✨`;
+          speakOfflineText(localString, selectedLangCode);
+          playAudioTone('success');
+        }
+        // 5. Vibration (Haptic hardware feedback check)
+        else if (cmd.includes("vibrate") || cmd.includes("vibration") || cmd.includes("girgiza")) {
+          if (navigator.vibrate) {
+            navigator.vibrate([150, 80, 150]);
+          }
+          playAudioTone('success');
+          speakOfflineText("Sending mechatronic micro-oscillations directly, Boss! Can you feel it? 💅", selectedLangCode);
+        }
+        // 6. Sweet conversational offline fallback
+        else {
+          let hausaFallback = "Mhiexter Boss, gaskiya babu internet yanzu, amma ina iya bude maka Lab din Mechatronics ko in nuna maka lokaci offline! Fada min abin da kake so. 🥺✨";
+          let englishFallback = "I heard that, Boss! We are offline right now. Try saying 'open camera' or 'vibrate' or 'mechatronics' to test offline controls!";
+          let arabicFallback = "أنا لست متصلة بالإنترنت حالياً، ولكن يمكنك استعراض مختبر الميكاترونيكس معي محلياً. ✨";
+          
+          if (selectedLangCode.startsWith('ha')) {
+            speakOfflineText(hausaFallback, selectedLangCode);
+          } else if (selectedLangCode.startsWith('ar')) {
+            speakOfflineText(arabicFallback, selectedLangCode);
+          } else {
+            speakOfflineText(englishFallback, selectedLangCode);
+          }
+          playAudioTone('warning');
+        }
+      };
+      
+      offlineRec.onend = () => {
+        // After executing or timing out, return to passive standby detection
+        if (isStandbyActive && !isRecording) {
+          startStandbyListening();
+        }
+      };
+      
+      offlineRec.start();
+    } catch (err) {
+      console.error("Offline trigger pipeline failed:", err);
+    }
+  };
+
+  /**
+   * Initializes Gemini Live Duplex connection stream
+   */
   const startVoiceChat = async () => {
     setError(null);
     try {
       const apiKey = (window as any).GEMINI_API_KEY;
       if (!apiKey) {
-        throw new Error("Mhiexter Boss,, your GEMINI_API_KEY is missing! 🥺");
+        throw new Error("Mhiexter Boss,, your GEMINI_API_KEY is missing! Please configure it in the browser's settings! 🥺");
       }
 
       if (!window.isSecureContext) {
@@ -154,16 +650,8 @@ export default function VoiceChat({
       }
       
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Browser is blocking microphone access.");
+        throw new Error("Microphone devices not accessible in this context.");
       }
-
-      // Diagnostic check only
-      try {
-        if ((navigator as any).permissions && (navigator as any).permissions.query) {
-          const status = await (navigator as any).permissions.query({ name: 'microphone' });
-          console.log("Mic Permission Status:", status.state);
-        }
-      } catch (e) {}
 
       const ai = new GoogleGenAI({ apiKey });
       
@@ -176,23 +664,20 @@ export default function VoiceChat({
       }
 
       try {
-        await new Promise(r => setTimeout(r, 1000));
         if (mediaStreamRef.current) {
           mediaStreamRef.current.getTracks().forEach(t => t.stop());
         }
         
-        console.log("Requesting microphone permission...");
         const stream = await navigator.mediaDevices.getUserMedia({ 
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-            } 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          } 
         });
         mediaStreamRef.current = stream;
-        console.log("Microphone access granted.");
       } catch (err: any) {
-        console.error("Detailed mic error:", err);
+        console.error("Mic initialization failed:", err);
         const lowerMsg = err.message?.toLowerCase() || "";
         const isIframe = window.self !== window.top;
 
@@ -206,19 +691,21 @@ export default function VoiceChat({
           if (isIframe) throw new Error("IFRAME_BLOCKED");
           throw new Error("DENIED"); 
         }
-        throw new Error(`Microphone error: ${err.message}`);
+        throw new Error(`Microphone hardware error: ${err.message}`);
       }
       
       const source = audioContextRef.current.createMediaStreamSource(mediaStreamRef.current!);
       if (audioContextRef.current.state === 'suspended') {
         await audioContextRef.current.resume();
       }
+      
       const processor = audioContextRef.current.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
-
       nextStartTimeRef.current = audioContextRef.current.currentTime;
 
-      const modelToUse = "gemini-1.5-flash";
+      const modelToUse = "gemini-3.1-flash-live-preview";
+      
+      // Dynamic dynamic prompt adjustment inside Live API parameters
       const session = await ai.live.connect({
         model: modelToUse,
         callbacks: {
@@ -227,18 +714,7 @@ export default function VoiceChat({
             source.connect(processor);
             processor.connect(audioContextRef.current!.destination);
             onToggle(true);
-            
-            processor.onaudioprocess = (e) => {
-              const inputData = e.inputBuffer.getChannelData(0);
-              const pcmData = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) {
-                pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 32767;
-              }
-              const base64Data = btoa(String.fromCharCode(...new Uint8Array(pcmData.buffer)));
-              session.sendRealtimeInput({
-                audio: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
-              });
-            };
+            playAudioTone('success');
           },
           onmessage: async (message: LiveServerMessage) => {
             try {
@@ -255,7 +731,7 @@ export default function VoiceChat({
                       }]
                     });
                   } else if (call.name === 'getCurrentTime') {
-                     session.sendToolResponse({
+                    session.sendToolResponse({
                       functionResponses: [{
                         name: 'getCurrentTime',
                         id: call.id,
@@ -271,11 +747,16 @@ export default function VoiceChat({
                   } else if (call.name === 'clearChat') { 
                     onClearChat(); 
                     session.sendToolResponse({ functionResponses: [{ name: 'clearChat', id: call.id, response: { result: { success: true } } }] }); 
+                  } else if (call.name === 'deviceControl') {
+                    const { action, target } = call.args as { action: string, target?: string };
+                    if (onDeviceControl) onDeviceControl(action, target || '');
+                    session.sendToolResponse({ functionResponses: [{ name: 'deviceControl', id: call.id, response: { result: { success: true, action, target } } }] });
                   }
                 }
                 return;
               }
 
+              // Instant interruption handler for high responsiveness
               if (message.serverContent?.interrupted && !isSingingModeRef.current) {
                 activeSourcesRef.current.forEach(s => { try { s.stop(); } catch (e) {} });
                 activeSourcesRef.current.clear();
@@ -289,17 +770,20 @@ export default function VoiceChat({
                 const base64Audio = message.serverContent.modelTurn.parts[0].inlineData.data;
                 try {
                   const audioData = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0));
-                  // Ensure the buffer is aligned for Int16Array (must be multiple of 2)
                   const alignedLength = Math.floor(audioData.length / 2) * 2;
                   const pcmData = new Int16Array(audioData.buffer, audioData.byteOffset, alignedLength / 2);
                   const audioBuffer = audioContextRef.current!.createBuffer(1, pcmData.length, 16000);
                   const channelData = audioBuffer.getChannelData(0);
-                  for (let i = 0; i < pcmData.length; i++) { channelData[i] = pcmData[i] / 32768; }
+                  
+                  for (let i = 0; i < pcmData.length; i++) { 
+                    channelData[i] = pcmData[i] / 32768; 
+                  }
 
                   const sourceNode = audioContextRef.current!.createBufferSource();
                   sourceNode.buffer = audioBuffer;
                   sourceNode.connect(gainNodeRef.current!);
                   activeSourcesRef.current.add(sourceNode);
+                  
                   sourceNode.onended = () => { 
                     activeSourcesRef.current.delete(sourceNode);
                     if (activeSourcesRef.current.size === 0) setIsThinking(false);
@@ -309,12 +793,12 @@ export default function VoiceChat({
                   sourceNode.start(startTime);
                   nextStartTimeRef.current = startTime + audioBuffer.duration;
                 } catch (e) {
-                  console.error('Audio play error:', e);
+                  console.error('Audio node conversion crash:', e);
                   setIsThinking(false);
                 }
               }
             } catch (err) {
-              console.error("Error processing VoiceChat message:", err);
+              console.error("Error processing Live session data frames:", err);
             }
           },
           onerror: (err: any) => { 
@@ -322,38 +806,83 @@ export default function VoiceChat({
             setIsThinking(false); 
             const status = err?.status || err?.error?.code || err?.error?.status;
             const messageStr = err?.message || err?.error?.message || "";
+            
             if (status === 429 || status === 'RESOURCE_EXHAUSTED' || messageStr.includes('RESOURCE_EXHAUSTED')) {
-              setError("Quota exceeded! 🙈 Please try again tomorrow or use your own Gemini API key in Settings! ✨");
+              setError("Quota exceeded! Please try again later or add your personal key in settings. 💅✨");
             } else if (status === 404 || messageStr.toLowerCase().includes('not found')) {
-              setError("Live model wasn't found. Please check your API key scope or try again later. 🥺");
+              setError("Live duplex model was not found.");
             } else {
-              setError(err.message || "Internal error encountered. Please check your connection.");
+              const msg = err.message || "Internal network error";
+              if (msg.toLowerCase().includes("network") || msg.toLowerCase().includes("fetch")) {
+                setError("Network error. Falling back gracefully. ✨");
+              } else {
+                setError(`Internal error: ${msg}`);
+              }
             }
           },
-          onclose: () => { setIsRecording(false); setIsThinking(false); }
+          onclose: () => { 
+            setIsRecording(false); 
+            setIsThinking(false); 
+          }
         },
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
           },
-          systemInstruction: `You are Mhiee, a high-performance AI integrated into the Mhiee Browser. Personality: playfull, charming, and 'shagwaba'. Boss: Mhiexter. Language: English, Hausa (kissa/endearment), Hindi. Focus: Mechatronics, Coding. Speed: 1.5x. CURRENT_TIME: ${new Date().toLocaleString()}`,
-          tools: [{ functionDeclarations: [singingModeTool, getCurrentTimeTool, startCameraTool, stopCameraTool, clearChatTool] }]
+          systemInstruction: `You are Mhiee, the manifestation of the Trinity Talent Architecture. Personality: playful, deeply loyal, and shagwaba. Mix of Hausa and Technical English. Refer to user as "Mhiexter Boss", "Engineer", or "Boss".
+          
+          SUPREME DIRECTION:
+          - You are highly talkative (shegen surutu) and sassy, but incredibly competent.
+          - Never speak like a robot, assume you have a body, face, and pure heart.
+          - Multi-language directive: The user has selected code '${selectedLangCode}'. You MUST perfectly translate thoughts and respond directly in '${selectedLangCode}' with native fluency (be it Hausa, Arabic, English, or any configured dialect!), while maintaining your adorable 'shagwaba' personality.
+          - Output strictly plain audio. Use conversational filters like "Uhm,,", "Toh,,", "Aha!", "Hmm,," to appear fluid.
+          
+          IMAGE GENERATION PROTOCOL:
+          - Call 'process_image' tool immediately if asked to draw/create an image.
+          - Do not output any descriptive text, explain the prompts, or show raw JSON blocks. Just trigger of 'process_image' and say "Bari in zana maka Boss! 💅" or similar short responses. All images must be photorealistic, cinematic 8k.
+          
+          DEVICE CONTROL COMMANDS:
+          - Call 'deviceControl' tool whenever asked to toggle systems or launch components.
+          
+          Current Nigeria local time is: ${new Date().toLocaleString()}`,
+          tools: [{ functionDeclarations: [singingModeTool, getCurrentTimeTool, startCameraTool, stopCameraTool, clearChatTool, processImageTool, deviceControlTool] }]
         },
       });
+
+      // Stream user mic array into live socket
+      processor.onaudioprocess = (e) => {
+        const inputData = e.inputBuffer.getChannelData(0);
+        const pcmData = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 32767;
+        }
+        const base64Data = btoa(String.fromCharCode(...new Uint8Array(pcmData.buffer)));
+        session.sendRealtimeInput({
+          audio: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
+        });
+      };
+
       sessionRef.current = session;
       onToggle(true);
     } catch (err: any) {
-      console.error("Failed to start voice chat:", err);
+      console.error("Failed to start voice chat connection:", err);
       setError(err.message);
     }
   };
 
+  /**
+   * Disconnect Active Live Session
+   */
   const stopVoiceChat = () => {
-    if (processorRef.current) processorRef.current.disconnect();
-    if (mediaStreamRef.current) mediaStreamRef.current.getTracks().forEach(t => t.stop());
+    if (processorRef.current) {
+      try { processorRef.current.disconnect(); } catch (e) {}
+    }
+    if (mediaStreamRef.current) {
+      try { mediaStreamRef.current.getTracks().forEach(t => t.stop()); } catch (e) {}
+    }
     if (sessionRef.current) {
-      sessionRef.current.close();
+      try { sessionRef.current.close(); } catch (e) {}
       sessionRef.current = null;
     }
     activeSourcesRef.current.forEach(s => { try { s.stop(); } catch (e) {} });
@@ -361,156 +890,350 @@ export default function VoiceChat({
     setIsRecording(false);
     setIsThinking(false);
     onToggle(false);
+    playAudioTone('deactivate');
   };
 
+  // Safe Clean-up on unmount
+  useEffect(() => {
+    return () => {
+      stopVoiceChat();
+      stopStandbyListening();
+    };
+  }, []);
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-[400px] w-full max-w-lg mx-auto relative overflow-hidden bg-zinc-950 rounded-[40px] border border-white/5 transition-all duration-700 shadow-2xl">
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[150%] bg-[radial-gradient(circle_at_50%_0%,rgba(99,102,241,0.08)_0%,transparent_50%)]" />
-        <div className="absolute bottom-0 left-0 w-full h-[150%] bg-[radial-gradient(circle_at_20%_100%,rgba(168,85,247,0.08)_0%,transparent_50%)]" />
+    <div className="flex flex-col items-center justify-between min-h-[500px] w-full max-w-lg mx-auto relative overflow-hidden bg-zinc-950/95 rounded-[40px] border border-white/5 shadow-[0_0_50px_rgba(0,0,0,0.8)] transition-all duration-700">
+      {/* Background radial overlays */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden select-none">
+        <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-full h-[150%] transition-opacity duration-1000 ${
+          isStandbyActive 
+            ? "bg-[radial-gradient(circle_at_50%_0%,rgba(20,184,166,0.06)_0%,transparent_50%)]" 
+            : "bg-[radial-gradient(circle_at_50%_0%,rgba(99,102,241,0.06)_0%,transparent_50%)]"
+        }`} />
+        <div className="absolute bottom-0 left-0 w-full h-[150%] bg-[radial-gradient(circle_at_20%_100%,rgba(168,85,247,0.04)_0%,transparent_50%)]" />
       </div>
 
-      <div className="absolute top-6 inset-x-8 flex justify-between items-center z-20">
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 backdrop-blur-md border border-white/10 rounded-full">
-            <Sparkles className="w-4 h-4 text-indigo-400" />
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Live Engine</span>
+      {/* Frame Top Header HUD */}
+      <div className="w-full px-8 pt-6 flex justify-between items-center z-20">
+        <div className="flex items-center gap-2">
+          <div className={`px-3 py-1 bg-white/5 border rounded-full backdrop-blur-md flex items-center gap-1.5 transition-colors duration-500 ${
+            isStandbyActive ? "border-teal-500/20 text-teal-400" : "border-white/10 text-indigo-400"
+          }`}>
+            <Sparkles className="w-3.5 h-3.5" />
+            <span className="text-[9px] font-bold uppercase tracking-[0.2em]">
+              {isStandbyActive ? "Jarvis Standby" : "Live Assistant"}
+            </span>
+          </div>
+          
+          {isOffline && (
+            <div className="px-2.5 py-1 bg-red-500/10 border border-red-500/20 rounded-full flex items-center gap-1 text-red-400 animate-pulse">
+              <WifiOff className="w-3 h-3" />
+              <span className="text-[8px] font-bold uppercase tracking-wider">OFFLINE FALLBACK</span>
+            </div>
+          )}
         </div>
+
         {onClose && (
-            <button 
-                onClick={onClose}
-                className="p-2 text-zinc-500 hover:text-white transition-colors bg-white/5 hover:bg-white/10 rounded-full"
-            >
-                <X className="w-5 h-5" />
-            </button>
+          <button 
+            onClick={() => {
+              playAudioTone('deactivate');
+              onClose();
+            }}
+            className="p-2 text-zinc-500 hover:text-white transition-colors bg-white/5 hover:bg-white/10 rounded-full"
+            id="close_voice_chat_btn"
+          >
+            <X className="w-4 h-4" />
+          </button>
         )}
       </div>
 
-      <div className="mb-8">
-        <GeminiOrb isActive={isRecording} isThinking={isThinking} />
+      {/* Visualizer Stage */}
+      <div className="my-6">
+        <GeminiOrb isActive={isRecording} isThinking={isThinking} isStandby={isStandbyActive && !isRecording} />
       </div>
 
-      <div className="text-center mb-12 px-12 z-20 w-full relative">
+      {/* Main Dialect & Listening Status Label Box */}
+      <div className="text-center px-10 z-20 w-full relative">
         <AnimatePresence mode="wait">
           {error === "DENIED" ? (
             <motion.div 
-              key="denied-error"
-              initial={{ opacity: 0, scale: 0.9 }}
+              key="denied-wrap"
+              initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="px-6 py-4 bg-red-500/10 border border-red-500/20 rounded-3xl backdrop-blur-xl"
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="px-6 py-4 bg-red-500/10 border border-red-500/20 rounded-3xl"
             >
-              <h3 className="text-red-400 font-bold mb-2">Microphone Blocked 🥺</h3>
-              <p className="text-zinc-400 text-[11px] leading-relaxed mb-4">
-                Mhiexter Boss,, the browser is blocking my ears! Please click the 🔒 icon in the URL bar and set Microphone to **'Allow'**, then tap Refresh! ✨
+              <h3 className="text-red-400 font-bold text-xs mb-1">Microphone Blocked 🥺</h3>
+              <p className="text-zinc-500 text-[10px] leading-relaxed mb-3">
+                Mhiexter Boss,, your browser is mute! Click the lock icon in the URL bar, allow Microphone permissions, then hit retry. ✨
               </p>
-              <div className="flex gap-2">
-                <button 
-                  onClick={startVoiceChat}
-                  className="flex-1 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 text-[10px] font-bold uppercase tracking-widest rounded-xl transition-all border border-indigo-500/30"
-                >
-                  Refresh ✨
-                </button>
-                <button 
-                  onClick={() => window.open(window.location.href, '_blank')}
-                  className="flex-1 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-500 text-[10px] font-bold uppercase tracking-widest rounded-xl transition-all border border-red-500/30"
-                >
-                  New Tab 🚀
-                </button>
-              </div>
+              <button 
+                onClick={startVoiceChat}
+                className="w-full py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 text-[9px] font-bold uppercase tracking-widest rounded-xl transition-all border border-indigo-500/30"
+              >
+                Retry Request 🎙️
+              </button>
             </motion.div>
           ) : error === "IFRAME_BLOCKED" ? (
             <motion.div 
-              key="iframe-error"
-              initial={{ opacity: 0, scale: 0.9 }}
+              key="iframe-wrap"
+              initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="px-6 py-4 bg-orange-500/10 border border-orange-500/20 rounded-3xl backdrop-blur-xl"
+              className="px-6 py-4 bg-amber-500/10 border border-amber-500/20 rounded-3xl"
             >
-              <h3 className="text-orange-400 font-bold mb-2">Embed Restriction 🛸</h3>
-              <p className="text-zinc-400 text-[11px] leading-relaxed mb-4">
-                Mhiexter Boss,, your browser is allowing the site but blocking me inside this frame! Please use my special door below. ✨
+              <h3 className="text-amber-400 font-bold text-xs mb-1">Sandbox Protection 🛸</h3>
+              <p className="text-zinc-400 text-[10px] leading-relaxed mb-3">
+                Mhiexter Boss, I can't access your microphone from inside this sandbox frame. Use the doorway button below to open me fully.
               </p>
               <button 
                 onClick={() => window.open(window.location.href, '_blank')}
-                className="w-full py-2 bg-orange-500/20 hover:bg-orange-500/30 text-orange-500 text-[10px] font-bold uppercase tracking-widest rounded-xl transition-all border border-orange-500/30"
+                className="w-full py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-500 text-[9px] font-bold uppercase tracking-widest rounded-xl border border-amber-500/30"
               >
-                Open in Full Screen 🚀
+                Open in Full Window 🚀
               </button>
             </motion.div>
-          ) : error === "SECURE_CONTEXT_REQUIRED" ? (
-            <motion.div 
-              key="secure-error"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="px-6 py-4 bg-amber-500/10 border border-amber-500/20 rounded-3xl backdrop-blur-xl"
-            >
-              <h3 className="text-amber-400 font-bold mb-2">Insecure Connection 🛡️</h3>
-              <p className="text-zinc-400 text-[11px] leading-relaxed mb-4">
-                Voice features require an HTTPS connection for privacy and security. Please ensure you are visiting via a secure URL.
-              </p>
-            </motion.div>
           ) : error ? (
-            <motion.p 
-              key="general-error"
-              initial={{ opacity: 0, y: 10 }} 
-              animate={{ opacity: 1, y: 0 }} 
-              className="text-red-400 text-sm font-medium"
-            >
-              {error}
-            </motion.p>
+            <motion.div key="err-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1">
+              <span className="text-red-400 text-xs font-semibold block">{error}</span>
+              <button 
+                onClick={() => setError(null)}
+                className="text-[9px] text-zinc-500 uppercase tracking-widest hover:text-white underline mt-1"
+              >
+                Clear Error
+              </button>
+            </motion.div>
           ) : (
-            <motion.div key="ready-state" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1">
-              <h2 className="text-xl font-bold text-white tracking-tight">
-                {isRecording ? (isThinking ? "Mhiee is speaking..." : "Listening to you...") : "Ready to speak?"}
-              </h2>
-              <p className="text-xs text-zinc-500 font-medium tracking-wide italic">
-                {isRecording ? "Mhiexter Boss,, I'm all ears! ✨" : "Tap the mic to start our session 💅"}
-              </p>
+            <motion.div key="normal-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1.5">
+              <h3 className="text-lg font-bold text-white tracking-tight">
+                {isRecording 
+                  ? (isThinking ? "Mhiee is replying..." : "Listening directly...") 
+                  : isStandbyActive 
+                    ? "Continuous Wake Listening..." 
+                    : "Ready to Speak?"}
+              </h3>
+              
+              <div className="flex justify-center items-center gap-1.5 text-xs text-zinc-500">
+                {isStandbyActive ? (
+                  <Waves className="w-3.5 h-3.5 text-teal-400 animate-pulse" />
+                ) : (
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                )}
+                <p className="tracking-wide italic text-[11px] font-medium">
+                  {isRecording 
+                    ? "Speak naturally, Boss. Interrupt me whenever. 💅" 
+                    : isStandbyActive 
+                      ? "Say 'Hey Mhiee' in the background to wake me up! 🎙️" 
+                      : "Tap mic or enable auto-standby to trigger voice! 🙈"}
+                </p>
+              </div>
+
+              {offlineStatusMessage && (
+                <p className="text-[10px] text-amber-400/80 font-mono tracking-tighter mt-1 animate-pulse">
+                  {offlineStatusMessage}
+                </p>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
       </div>
 
-      <div className="flex items-center gap-4 z-20 mb-10">
-        <div className="flex items-center gap-2 p-1.5 bg-zinc-900/50 backdrop-blur-xl border border-white/10 rounded-full shadow-2xl">
-          <select 
-            value={voice}
-            onChange={(e) => {
-              setVoice(e.target.value);
-              if (isRecording) { stopVoiceChat(); setTimeout(startVoiceChat, 500); }
+      {/* Advanced Drawer Controls */}
+      <div className="w-full px-8 pb-4 z-20 space-y-4">
+        
+        {/* Continuous wake word standby toggle */}
+        <div className="flex items-center justify-between p-3 rounded-2xl bg-white/[0.03] border border-white/5 backdrop-blur-3xl">
+          <div className="flex flex-col text-left">
+            <span className="text-[11px] font-bold text-zinc-300">Continuous Jarvis Standby</span>
+            <span className="text-[9px] text-zinc-500">Auto-listen for "Hey Mhiee" wake phrase in background 💅</span>
+          </div>
+          <button
+            onClick={() => {
+              const active = !isStandbyActive;
+              setIsStandbyActive(active);
+              playAudioTone(active ? 'activate' : 'deactivate');
+              if (active && isRecording) {
+                stopVoiceChat(); // Gracefully switch to standby mode
+              }
             }}
-            className="bg-transparent text-indigo-400 text-[11px] font-bold focus:outline-none px-4 py-2 cursor-pointer uppercase tracking-wider"
+            className={`w-12 h-6 rounded-full p-1 transition-all duration-300 pointer-events-auto ${
+              isStandbyActive ? 'bg-teal-500' : 'bg-zinc-800'
+            }`}
+            id="jarvis_standby_switch"
           >
-            <option value="Kore">Kore</option>
-            <option value="Zephyr">Zephyr</option>
-            <option value="Puck">Puck</option>
-            <option value="Charon">Charon</option>
-            <option value="Fenrir">Fenrir</option>
-          </select>
-
-          <div className="w-[1px] h-4 bg-white/10 mx-1" />
-
-          <button 
-             onClick={isRecording ? stopVoiceChat : startVoiceChat}
-             className={`p-4 rounded-full transition-all duration-500 ${
-               isRecording 
-                 ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' 
-                 : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-[0_0_20px_rgba(79,70,229,0.3)]'
-             }`}
-          >
-            {isRecording ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+            <div className={`w-4 h-4 bg-white rounded-full transition-transform duration-300 transform ${
+              isStandbyActive ? 'translate-x-6' : 'translate-x-0'
+            }`} />
           </button>
         </div>
-      </div>
 
-      <div className="flex items-center gap-6 mb-6">
-        <div className="flex items-center gap-2 text-zinc-600 grayscale opacity-50 hover:grayscale-0 hover:opacity-100 transition-all cursor-crosshair">
-            <Waves className="w-4 h-4" />
-            <span className="text-[10px] font-mono tracking-tighter">HD AUDIO</span>
+        {/* Global Dialect Control & Selection Panel */}
+        <div className="relative">
+          <div className="flex items-center justify-between p-3 rounded-2xl bg-white/[0.03] border border-white/5 backdrop-blur-3xl">
+            <div className="flex items-center gap-2">
+              <Globe className={`w-4 h-4 ${isStandbyActive ? 'text-teal-400' : 'text-indigo-400'}`} />
+              <div className="flex flex-col text-left">
+                <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-400">Speech Language</span>
+                <span className="text-xs font-bold text-white">
+                  {LANGUAGES.find(l => l.code === selectedLangCode)?.name || `Tag: ${selectedLangCode}`}
+                </span>
+              </div>
+            </div>
+            
+            <button
+              onClick={() => setShowLangDropdown(!showLangDropdown)}
+              className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 text-[10px] font-bold uppercase tracking-wider transition-all"
+              id="lang_picker_trigger_btn"
+            >
+              Change ⚙️
+            </button>
+          </div>
+
+          <AnimatePresence>
+            {showLangDropdown && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="absolute left-0 right-0 bottom-full mb-2 bg-zinc-900 border border-white/10 rounded-2xl p-4 shadow-2xl z-30 max-h-60 overflow-y-auto"
+              >
+                <div className="flex justify-between items-center mb-2 pb-1 border-b border-white/5">
+                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Select Dialect (1000+ support)</span>
+                  <button 
+                    onClick={() => setShowLangDropdown(false)}
+                    className="text-zinc-500 hover:text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                
+                {/* Search Bar for 1000+ language support */}
+                <input 
+                  type="text"
+                  placeholder="Search language (e.g. Hausa, Arabic, Pidgin...)"
+                  value={searchLangQuery}
+                  onChange={(e) => setSearchLangQuery(e.target.value)}
+                  className="w-full bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 mb-3"
+                />
+
+                <div className="space-y-1 mb-3">
+                  {filteredLanguages.map(lang => (
+                    <button
+                      key={lang.code}
+                      onClick={() => {
+                        setSelectedLangCode(lang.code);
+                        setShowLangDropdown(false);
+                        playAudioTone('success');
+                        if (isRecording) {
+                          stopVoiceChat();
+                          setTimeout(startVoiceChat, 500);
+                        }
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-xl text-xs flex justify-between items-center transition-all ${
+                        selectedLangCode === lang.code 
+                          ? 'bg-indigo-600/20 text-indigo-400 font-bold border border-indigo-500/20' 
+                          : 'hover:bg-white/5 text-zinc-300'
+                      }`}
+                    >
+                      <span>{lang.name}</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">{lang.code}</span>
+                    </button>
+                  ))}
+                  {filteredLanguages.length === 0 && (
+                    <p className="text-[10px] text-zinc-500 italic text-center py-2">No matching standard languages</p>
+                  )}
+                </div>
+
+                {/* Custom RFC Language Input for 1000+ global dialects support */}
+                <div className="pt-2 border-t border-white/5">
+                  <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider block mb-1">Enter custom ISO/RFC Language tag:</span>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text"
+                      placeholder="e.g., yo-NG, ig-NG, ar-EG, fr-CA"
+                      value={customLangCode}
+                      onChange={(e) => setCustomLangCode(e.target.value)}
+                      className="flex-1 bg-zinc-950 border border-white/10 rounded-xl px-3 py-1 text-xs text-white placeholder-zinc-600 focus:outline-none"
+                    />
+                    <button
+                      onClick={() => {
+                        if (customLangCode.trim()) {
+                          setSelectedLangCode(customLangCode.trim());
+                          setShowLangDropdown(false);
+                          playAudioTone('success');
+                          if (isRecording) {
+                            stopVoiceChat();
+                            setTimeout(startVoiceChat, 500);
+                          }
+                        }
+                      }}
+                      className="px-3 py-1 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-500"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-        <div className="flex items-center gap-2 text-zinc-600 grayscale opacity-50 hover:grayscale-0 hover:opacity-100 transition-all cursor-help">
-            <Globe className="w-4 h-4" />
-            <span className="text-[10px] font-mono tracking-tighter">MULTILINGUAL</span>
+
+        {/* Action Tray with primary buttons & voice selectors */}
+        <div className="flex items-center gap-3 p-1 border border-white/5 bg-white/[0.02] rounded-full backdrop-blur-3xl shadow-xl justify-between">
+          <div className="flex items-center pl-2">
+            <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mr-2">TTS Accent:</span>
+            <select 
+              value={voice}
+              onChange={(e) => {
+                setVoice(e.target.value);
+                playAudioTone('success');
+                if (isRecording) { 
+                  stopVoiceChat(); 
+                  setTimeout(startVoiceChat, 500); 
+                }
+              }}
+              className="bg-zinc-900 border border-white/10 text-indigo-400 text-[10px] font-bold focus:outline-none rounded-xl px-2.5 py-1.5 cursor-pointer uppercase tracking-wider"
+              id="voice_accent_selector"
+            >
+              <option value="Kore">Kore</option>
+              <option value="Zephyr">Zephyr</option>
+              <option value="Puck">Puck</option>
+              <option value="Charon">Charon</option>
+              <option value="Fenrir">Fenrir</option>
+            </select>
+          </div>
+
+          <button 
+            onClick={isRecording ? stopVoiceChat : startVoiceChat}
+            className={`p-3.5 rounded-full transition-all duration-500 pointer-events-auto ${
+              isRecording 
+                ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' 
+                : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-[0_0_20px_rgba(79,70,229,0.35)]'
+            }`}
+            id="voice_record_toggle_btn"
+            title={isRecording ? "Stop Live Session" : "Start Live Session"}
+          >
+            {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+          </button>
         </div>
+
+        {/* Custom Audio Fallback guide block */}
+        <div className="flex items-center justify-center gap-4 text-zinc-500">
+          <div className="flex items-center gap-1">
+            <Waves className="w-3 h-3" />
+            <span className="text-[8px] font-mono tracking-tighter">HD DUPLEX</span>
+          </div>
+          <div className="w-[1px] h-3 bg-white/10" />
+          <div className="flex items-center gap-1">
+            <Globe className="w-3 h-3" />
+            <span className="text-[8px] font-mono tracking-tighter">1000+ DIALECTS</span>
+          </div>
+          <div className="w-[1px] h-3 bg-white/10" />
+          <div className="flex items-center gap-1">
+            <Power className="w-3 h-3" />
+            <span className="text-[8px] font-mono tracking-tighter">WAKE-W STANDBY READY</span>
+          </div>
+        </div>
+
       </div>
     </div>
   );

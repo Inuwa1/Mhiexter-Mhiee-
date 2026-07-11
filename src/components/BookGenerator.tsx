@@ -78,7 +78,7 @@ export default function BookGenerator() {
       const response = await callAiWithRetry((key) => {
         const aiInstance = new GoogleGenAI({ apiKey: key });
         return aiInstance.models.generateContent({
-          model: 'gemini-1.5-pro',
+          model: 'gemini-3.1-pro-preview',
           contents: `Create an outline for a comprehensive, long-form book about: ${topic}. Include a title and a list of 20 detailed chapter titles. Return JSON with title and chapterTitles (array of strings).`,
           config: {
             responseMimeType: "application/json",
@@ -128,7 +128,7 @@ export default function BookGenerator() {
       const streamResult = streamAiWithRetry<any>(async (apiKey) => {
         const ai = new GoogleGenAI({ apiKey });
         const res = await ai.models.generateContentStream({
-          model: 'gemini-1.5-pro',
+          model: 'gemini-3.1-pro-preview',
           contents: `Write a very detailed, long chapter for the book "${newBook.title}". Chapter title: "${newBook.chapters[index].title}". Provide at least 5000 words for this chapter.`,
           config: { }
         });

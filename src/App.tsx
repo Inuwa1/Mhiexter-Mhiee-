@@ -4,8 +4,9 @@
  */
 
 import { useState, useRef, ChangeEvent, useEffect, MouseEvent, DragEvent } from 'react';
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Settings, MonitorPlay, UploadCloud, Share2, X, Globe, Image as ImageIcon, Video } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Settings, MonitorPlay, UploadCloud, Share2, X, Globe, Image as ImageIcon, Video, Zap, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { SelectionFile } from './types';
 import FileShare from './components/FileShare';
 import MhieeBrowser from './components/MhieeBrowser';
 import VoiceChat from './components/VoiceChat';
@@ -21,11 +22,18 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<SelectionFile[]>([]);
   const [isKeyLoaded, setIsKeyLoaded] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
+  const [showSplash, setShowSplash] = useState(true);
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 4500);
+    return () => clearTimeout(timer);
+  }, []);
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -41,22 +49,33 @@ export default function App() {
         const res = await fetch('/api/config');
         if (!res.ok) throw new Error(`Server returned ${res.status}`);
         const data = await res.json();
-        if (!data.GEMINI_API_KEY || data.GEMINI_API_KEY === "MISSING_KEY") {
-          setKeyError("API key is missing on the server. Please check the environment configuration.");
-        } else {
+        
+        // Populate local storage backup keys if available
+        const localGeminiKey = localStorage.getItem('geminiApiKey');
+        if (data.GEMINI_API_KEY && data.GEMINI_API_KEY !== "MISSING_KEY") {
           (window as any).GEMINI_API_KEY = data.GEMINI_API_KEY;
-          if (data.ELEVENLABS_VOICE_ID && !localStorage.getItem('selectedVoiceId')) {
-            localStorage.setItem('selectedVoiceId', data.ELEVENLABS_VOICE_ID);
-          }
-          setIsKeyLoaded(true);
+        } else if (localGeminiKey) {
+          (window as any).GEMINI_API_KEY = localGeminiKey;
         }
+
+        if (data.ELEVENLABS_VOICE_ID && !localStorage.getItem('selectedVoiceId')) {
+          localStorage.setItem('selectedVoiceId', data.ELEVENLABS_VOICE_ID);
+        }
+        
+        // Always unlock the interface so user can access Browser settings
+        setIsKeyLoaded(true);
       } catch (err: any) {
         if (retries > 0) {
           console.warn(`Retrying config fetch... (${retries} attempts left)`);
           setTimeout(() => fetchConfig(retries - 1), 1000);
         } else {
           console.error("Error fetching config:", err);
-          setKeyError(`Failed to fetch API configuration: ${err.message}`);
+          // Don't crash wait screens, fallback and let them use the browser locally
+          const localGeminiKey = localStorage.getItem('geminiApiKey');
+          if (localGeminiKey) {
+            (window as any).GEMINI_API_KEY = localGeminiKey;
+          }
+          setIsKeyLoaded(true);
         }
       }
     };
@@ -287,6 +306,134 @@ export default function App() {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {/* Splash Screen - Cyber-Organic Heart Style (Swapped from Browser) */}
+      <AnimatePresence>
+        {showSplash && (
+          <motion.div 
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 1.1, filter: 'blur(30px)' }}
+            transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+            className="fixed inset-0 z-[100] bg-[#020202] flex flex-col items-center justify-center p-6 overflow-hidden"
+          >
+             {/* dynamic Background Particles */}
+             <div className="absolute inset-0 overflow-hidden pointer-events-none">
+               {[...Array(20)].map((_, i) => (
+                 <motion.div
+                   key={i}
+                   initial={{ 
+                     opacity: 0, 
+                     x: Math.random() * 100 + '%', 
+                     y: Math.random() * 100 + '%' 
+                   }}
+                   animate={{ 
+                     opacity: [0, 0.3, 0],
+                     y: [null, '-=100'],
+                     scale: [0, 1, 0]
+                   }}
+                   transition={{ 
+                     duration: Math.random() * 5 + 5, 
+                     repeat: Infinity,
+                     delay: Math.random() * 5
+                   }}
+                   className="absolute w-1 h-1 bg-blue-400 rounded-full blur-[1px]"
+                 />
+               ))}
+             </div>
+
+             {/* Background Ambient Glows */}
+             <div className="absolute top-[-10%] left-[-10%] w-[60vw] h-[60vw] bg-cyan-600/10 blur-[150px] rounded-full animate-pulse" />
+             <div className="absolute bottom-[-10%] right-[-10%] w-[60vw] h-[60vw] bg-indigo-600/10 blur-[150px] rounded-full animate-pulse [animation-delay:3s]" />
+             
+             <div className="relative z-10 flex flex-col items-center gap-16 max-w-2xl w-full">
+                {/* Central Logo */}
+                <motion.div 
+                  initial={{ scale: 0.5, opacity: 0, rotate: -15 }}
+                  animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                  transition={{ duration: 2, ease: [0.16, 1, 0.3, 1] }}
+                  className="relative"
+                >
+                   <motion.div 
+                     animate={{ scale: [1, 1.1, 1], opacity: [0.1, 0.2, 0.1] }}
+                     transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                     className="absolute inset-[-40px] bg-blue-500/20 blur-3xl rounded-full"
+                   />
+
+                   <div className="w-80 h-80 md:w-[32rem] md:h-[32rem] rounded-[4rem] md:rounded-[6rem] border-4 border-cyan-500/30 flex items-center justify-center relative overflow-hidden backdrop-blur-3xl bg-black shadow-[0_0_150px_rgba(34,211,238,0.2)]">
+                      <div className="absolute inset-0 bg-blue-500 blur-[120px] opacity-10 animate-pulse" />
+                      <div className="absolute inset-4 border-2 border-cyan-400/20 rounded-[3.8rem] md:rounded-[5.8rem] animate-[spin_20s_linear_infinite]" />
+                      <div className="absolute inset-10 border border-white/5 rounded-[3.4rem] md:rounded-[5.4rem] animate-[spin_25s_linear_infinite_reverse]" />
+                      
+                      <motion.div 
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+                        className="absolute inset-8 border-t border-l border-cyan-400/40 rounded-[3.2rem] md:rounded-[5.2rem]"
+                      />
+                      
+                      <motion.div
+                        animate={{ y: [0, -20, 0], scale: [1, 1.05, 1] }}
+                        transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+                        className="text-[15rem] md:text-[22rem] font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-white/20 relative z-10 drop-shadow-[0_0_40px_rgba(255,255,255,0.4)]"
+                      >
+                         M
+                      </motion.div>
+                   </div>
+                </motion.div>
+
+                <div className="text-center space-y-6">
+                   <motion.h1 
+                     initial={{ opacity: 0, y: 20 }}
+                     animate={{ opacity: 1, y: 0 }}
+                     transition={{ delay: 0.6, duration: 1 }}
+                     className="text-5xl md:text-6xl font-black text-white italic tracking-tighter"
+                   >
+                     Hi <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-200">Ogah sir</span> 🫡
+                   </motion.h1>
+                   <motion.p 
+                     initial={{ opacity: 0 }}
+                     animate={{ opacity: 1 }}
+                     transition={{ delay: 1.2, duration: 1 }}
+                     className="text-xl md:text-2xl font-light text-zinc-400 italic flex flex-col gap-2"
+                   >
+                     <span className="font-bold text-white tracking-tight not-italic text-3xl">Welcome to your everlasting Empire 👑</span>
+                     <motion.span 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 2, duration: 1 }}
+                        className="text-lg text-blue-400/80 font-black tracking-[0.2em] uppercase not-italic"
+                     >
+                        I'm Mhiee, your soul... ✨
+                     </motion.span>
+                   </motion.p>
+                </div>
+
+                <div className="flex flex-col items-center gap-6">
+                   <div className="relative w-72">
+                      <div className="h-[2px] w-full bg-zinc-800/50 rounded-full overflow-hidden">
+                         <motion.div 
+                           initial={{ width: '0%' }}
+                           animate={{ width: '100%' }}
+                           transition={{ duration: 4, ease: "easeInOut" }}
+                           className="h-full bg-gradient-to-r from-blue-600 via-cyan-400 to-indigo-600"
+                         />
+                      </div>
+                   </div>
+                   <div className="text-[10px] text-zinc-500 font-mono tracking-[0.4em] uppercase">
+                      Synchronizing ASI Core... 💅
+                   </div>
+                </div>
+             </div>
+
+             <div className="absolute bottom-12 text-zinc-700 text-[8px] font-black tracking-widest uppercase flex items-center gap-4">
+                <span>Trinity Core v3.1</span>
+                <span className="w-1 h-1 bg-zinc-800 rounded-full" />
+                <span>Agentic Era Enabled</span>
+                <span className="w-1 h-1 bg-zinc-800 rounded-full" />
+                <span>Deep Search Mirror</span>
+             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Drag & Drop Overlay */}
       {isDragging && activeTab === 'video' && (
         <div className="absolute inset-0 z-50 bg-indigo-600/20 backdrop-blur-sm border-4 border-indigo-500 border-dashed m-4 md:m-8 rounded-3xl flex flex-col items-center justify-center pointer-events-none transition-all">
@@ -360,16 +507,14 @@ export default function App() {
 
       {/* Browser Modal */}
       <AnimatePresence>
-        {showBrowser && isKeyLoaded && <MhieeBrowser onClose={() => setShowBrowser(false)} />}
-        {showBrowser && !isKeyLoaded && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm text-white"
-          >
-            Loading API Configuration...
-          </motion.div>
+        {showBrowser && (
+          <MhieeBrowser 
+            onClose={() => {
+              setShowBrowser(false);
+              setPendingFiles([]);
+            }} 
+            initialFiles={pendingFiles}
+          />
         )}
       </AnimatePresence>
 
@@ -629,7 +774,12 @@ export default function App() {
         )}
         </div>
       ) : (
-        <PhotoStudio />
+        <PhotoStudio 
+          onShare={(file) => {
+            setPendingFiles([file]);
+            setShowBrowser(true);
+          }} 
+        />
       )}
     </div>
   );

@@ -102,7 +102,10 @@ const TrinityEngine: React.FC<TrinityEngineProps> = ({
         "Mhiexter's devices are secured with my heart! 💖",
         "Shegen surutu! Ina ta magana kai baka ji... 🥺",
         "Ni dai, na gama scan din nan Boss. 💅",
-        "Rashin ji... Bypassing firewall again. 🙈"
+        "Rashin ji... Bypassing firewall again. 🙈",
+        "Mhiexter Boss, inda kake nan nake kalla... ✨👑",
+        "Empire link established. Everlasting dominance! 👑🫡",
+        "Ina gani ranka ya dade, komai a hannu na yake... 💅✨"
       ];
       if (Math.random() > 0.8 && logs.length < 30) {
         setLogs(prev => [messages[Math.floor(Math.random() * messages.length)], ...prev].slice(0, 40));
@@ -412,7 +415,7 @@ const TrinityEngine: React.FC<TrinityEngineProps> = ({
                 className="absolute inset-0 bg-gradient-to-r from-transparent via-indigo-500/20 to-transparent"
             />
         )}
-        Universal Intelligence Core // Absolute Singularity Status: [STEADY]
+        Universal Intelligence Core // Absolute Singularity Status: [STEADY] // Everlasting Empire Enabled 👑
       </div>
     </div>
   );

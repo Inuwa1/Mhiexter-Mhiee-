@@ -2,21 +2,105 @@
   "entities": {
     "Memory": {
       "title": "Memory",
-      "description": "A stored insight, code trick, or conversation summary.",
+      "description": "A long-term memory, mechatronics rule, or custom hack.",
       "type": "object",
       "properties": {
-        "uid": { "type": "string", "description": "User ID" },
-        "content": { "type": "string", "description": "The stored knowledge content" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "tags": { "type": "array", "description": "Array of tags" }
+        "uid": { "type": "string", "description": "Owner user ID" },
+        "content": { "type": "string", "description": "Memory description" },
+        "category": { "type": "string", "description": "Memory category e.g. mechatronics, coding" },
+        "importance": { "type": "integer", "description": "Importance level 1-10" },
+        "createdAt": { "type": "integer", "description": "Creation timestamp in millis" },
+        "updatedAt": { "type": "integer", "description": "Update timestamp in millis" },
+        "tags": { "type": "array", "description": "Optional search tags" }
       },
-      "required": ["uid", "content", "createdAt"]
+      "required": ["uid", "content", "category", "importance", "createdAt", "updatedAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile settings, mechatronics preference, and personal metadata.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "integer" },
+        "updatedAt": { "type": "integer" },
+        "preferences": { "type": "object" },
+        "bookmarks": { "type": "array" },
+        "history": { "type": "array" },
+        "credentials": { "type": "array" },
+        "mechatronicsProjects": { "type": "array" }
+      },
+      "required": ["uid", "displayName", "email", "photoURL", "createdAt", "updatedAt"]
+    },
+    "ChatSession": {
+      "title": "ChatSession",
+      "description": "Persistent conversational history.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "title": { "type": "string" },
+        "messages": { "type": "array" },
+        "updatedAt": { "type": "integer" },
+        "isPinned": { "type": "boolean" }
+      },
+      "required": ["id", "uid", "title", "messages", "updatedAt"]
+    },
+    "TaskPlan": {
+      "title": "TaskPlan",
+      "description": "A mechatronics task plan managed by Gemini AI.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "request": { "type": "string" },
+        "tasks": { "type": "array" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "integer" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["id", "uid", "request", "tasks", "status", "createdAt", "updatedAt"]
+    },
+    "DownloadTask": {
+      "title": "DownloadTask",
+      "description": "Active download progress tracker.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "url": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "type": "string" },
+        "progress": { "type": "integer" },
+        "size": { "type": "string" },
+        "type": { "type": "string" },
+        "createdAt": { "type": "integer" }
+      },
+      "required": ["id", "uid", "url", "title", "status", "progress", "size", "type", "createdAt"]
     }
   },
   "firestore": {
     "/memories/{memoryId}": {
       "schema": "Memory",
-      "description": "User insights and knowledge base"
+      "description": "User mechatronics and coding memories."
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile with synchronized settings/history."
+    },
+    "/users/{userId}/sessions/{sessionId}": {
+      "schema": "ChatSession",
+      "description": "Persistent chat session messages."
+    },
+    "/users/{userId}/taskPlans/{planId}": {
+      "schema": "TaskPlan",
+      "description": "AI-guided active planning tasks."
+    },
+    "/users/{userId}/downloads/{downloadId}": {
+      "schema": "DownloadTask",
+      "description": "Queued files managed by downManager."
     }
   }
 }

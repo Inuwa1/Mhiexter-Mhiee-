@@ -48,6 +48,9 @@ export async function callAiWithRetry<T>(
       message.includes('rate limit') ||
       message.includes('xhr error') ||
       message.includes('Http response') ||
+      message.includes('fetch') ||
+      message.includes('network') ||
+      message.includes('connection') ||
       message.includes('deadline exceeded');
 
     if (isRetryable && retries > 0) {
@@ -91,6 +94,9 @@ export async function* streamAiWithRetry<T>(
         message.includes('rate limit') ||
         message.includes('xhr error') ||
         message.includes('Http response') ||
+        message.includes('fetch') ||
+        message.includes('network') ||
+        message.includes('connection') ||
         message.includes('deadline exceeded');
 
       if (isRetryable && currentRetries > 0) {

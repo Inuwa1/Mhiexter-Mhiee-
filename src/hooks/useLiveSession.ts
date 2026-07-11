@@ -50,7 +50,7 @@ export const useLiveSession = () => {
       const ai = new GoogleGenAI({ apiKey });
       
       const session = await ai.live.connect({
-        model: "gemini-1.5-flash",
+        model: "gemini-3.1-flash-live-preview",
         callbacks: {
           onopen: async () => {
             addLog("Session connected ✨");

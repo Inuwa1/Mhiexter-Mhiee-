@@ -2,14 +2,24 @@ import React, { useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-const ThreeScene: React.FC<{ prompt: string, mode: 'sketch' | 'real', onStatusUpdate: (status: string) => void }> = ({ prompt, mode, onStatusUpdate }) => {
+interface ThreeSceneProps {
+  prompt?: string;
+  mode?: 'sketch' | 'real';
+  onStatusUpdate?: (status: string) => void;
+}
+
+const ThreeScene: React.FC<ThreeSceneProps> = ({ 
+  prompt = "Concept", 
+  mode = "real", 
+  onStatusUpdate 
+}) => {
   const mountRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const currentMount = mountRef.current;
     if (!currentMount) return;
 
-    onStatusUpdate(`Mhiee is summoning the ${prompt} from the imaginary world...`);
+    onStatusUpdate?.(`Mhiee is summoning the ${prompt} from the imaginary world...`);
 
     // SCENE SETUP (Narrative: Dark void background for both)
     const scene = new THREE.Scene();
@@ -17,7 +27,7 @@ const ThreeScene: React.FC<{ prompt: string, mode: 'sketch' | 'real', onStatusUp
 
     // ... (rest of the logic) ...
 
-    onStatusUpdate(`The ${prompt} has materialized in ${mode} mode.`);
+    onStatusUpdate?.(`The ${prompt} has materialized in ${mode} mode.`);
     
     // ... animation loop ...
 

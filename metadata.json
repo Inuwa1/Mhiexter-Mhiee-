@@ -1,5 +1,8 @@
 {
   "name": "Mhiee Browser",
   "description": "A high-performance AI assistant integrated into the Mhiee Browser, providing real-time, accurate information for Mechatronics students and beyond.",
-  "requestFramePermissions": ["camera", "microphone", "geolocation"]
+  "requestFramePermissions": ["camera", "microphone", "geolocation"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

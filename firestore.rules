@@ -1,19 +1,60 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // Default-deny safety net
     match /{document=**} {
       allow read, write: if false;
     }
     
-    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    // Global helper primitives
     function isSignedIn() { return request.auth != null; }
     function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
-
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    // Hardened User Profiles & Connected Cloud Sync
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && incoming().uid == userId
+        && incoming().email is string && incoming().email.size() <= 256
+        && incoming().displayName is string && incoming().displayName.size() <= 256;
+      allow update: if isOwner(userId)
+        && incoming().uid == userId
+        && incoming().email is string && incoming().email.size() <= 256
+        && incoming().displayName is string && incoming().displayName.size() <= 256;
+      allow delete: if isOwner(userId);
+      
+      // Subcollections under /users/{userId}/
+      
+      match /sessions/{sessionId} {
+        allow read, write: if isOwner(userId) && isValidId(sessionId);
+      }
+      
+      match /taskPlans/{planId} {
+        allow read, write: if isOwner(userId) && isValidId(planId);
+      }
+      
+      match /downloads/{downloadId} {
+        allow read, write: if isOwner(userId) && isValidId(downloadId);
+      }
+    }
+    
+    // Hardened Memories Collection
     match /memories/{memoryId} {
-      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid && request.resource.data.createdAt == request.time;
-      allow update: if isSignedIn() && resource.data.uid == request.auth.uid && request.resource.data.uid == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow read: if isSignedIn() && existing().uid == request.auth.uid && isValidId(memoryId);
+      allow create: if isSignedIn() 
+        && incoming().uid == request.auth.uid 
+        && isValidId(memoryId)
+        && incoming().content is string && incoming().content.size() <= 100000;
+      allow update: if isSignedIn() 
+        && existing().uid == request.auth.uid 
+        && incoming().uid == request.auth.uid
+        && isValidId(memoryId)
+        && incoming().content is string && incoming().content.size() <= 100000;
+      allow delete: if isSignedIn() && existing().uid == request.auth.uid && isValidId(memoryId);
     }
   }
 }

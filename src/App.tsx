@@ -11,6 +11,7 @@ import FileShare from './components/FileShare';
 import MhieeBrowser from './components/MhieeBrowser';
 import VoiceChat from './components/VoiceChat';
 import PhotoStudio from './components/PhotoStudio';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 
 export default function App() {
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
@@ -781,6 +782,7 @@ export default function App() {
           }} 
         />
       )}
+      <SpeedInsights />
     </div>
   );
 }

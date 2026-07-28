@@ -28,10 +28,14 @@
     "firebase": "^12.11.0",
     "idb-keyval": "^6.2.2",
     "instagram-url-direct": "^2.0.7",
+    "jszip": "^3.10.1",
     "katex": "^0.16.40",
     "konva": "^10.2.5",
     "lucide-react": "^0.546.0",
+    "mammoth": "^1.12.0",
     "motion": "^12.23.24",
+    "officeparser": "^7.5.0",
+    "pdf-parse": "^2.4.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-image-crop": "^11.0.10",
@@ -50,6 +54,7 @@
     "twitter-downloader": "^1.1.8",
     "vite": "^6.2.0",
     "ws": "^8.20.0",
+    "xlsx": "^0.18.5",
     "youtubei.js": "^17.0.1"
   },
   "devDependencies": {

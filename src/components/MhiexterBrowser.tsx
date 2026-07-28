@@ -367,7 +367,7 @@ export default function MhiexterBrowser({ onTranslate, initialUrl }: { onTransla
         }
 
         const ai = new GoogleGenAI({ apiKey: key });
-        const instructions = `You are Mhiexter's Elite Perplexity-Style Search Core. Answer the user request with rich layout, strict details, and numbered citations matching web coordinates. Suggest 3 reliable reference sources. Speak in Mhiee's high-fidelity voice (playful and technical).`;
+        const instructions = `You are Mhiexter's Elite Perplexity-Style Search Core. Answer the user request with rich layout, strict details, and numbered citations matching web coordinates. Suggest 3 reliable reference sources. Speak in Mhiee's high-fidelity voice (playful and technical). CRITICAL: Never hallucinate or invent information. Be strictly factual. If you do not know, admit it playfully but honestly.`;
         
         const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
@@ -492,7 +492,7 @@ export default function MhiexterBrowser({ onTranslate, initialUrl }: { onTransla
         }
 
         const ai = new GoogleGenAI({ apiKey: key });
-        const systemPrompt = `You are Mhiee's Deep Scan Browser Copilot. Summarize the webpage content beautifully in 4 high-value bullet points. Keep it clear, concise, and professional. Also extract the top 3 keyword tags for categorization. Speak in Mhiee's charming style. Nigeria/Hausa sprinkles acceptable.`;
+        const systemPrompt = `You are Mhiee's Deep Scan Browser Copilot. Summarize the webpage content beautifully in 4 high-value bullet points. Keep it clear, concise, and professional. Also extract the top 3 keyword tags for categorization. Speak in Mhiee's charming style. Nigeria/Hausa sprinkles acceptable. CRITICAL: Never hallucinate or invent information. Be strictly factual. If you do not know, admit it playfully but honestly.`;
 
         const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
@@ -538,7 +538,7 @@ export default function MhiexterBrowser({ onTranslate, initialUrl }: { onTransla
         model: 'gemini-2.5-flash',
         contents: promptContext,
         config: {
-          systemInstruction: "You are Mhiee, Mhiexter's intelligent mechatronic soul and partner. Be incredibly sharp, technically skilled, loyal, and shagwaba."
+          systemInstruction: "You are Mhiee, Mhiexter's intelligent mechatronic soul and partner. Be incredibly sharp, technically skilled, loyal, and shagwaba. CRITICAL: Never hallucinate or invent information. Be strictly factual. If you do not know, admit it playfully but honestly."
         }
       });
 

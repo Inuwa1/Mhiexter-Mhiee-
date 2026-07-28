@@ -838,7 +838,62 @@ async function startServer() {
     }
   });
 
-  app.use(express.json()); // Enable JSON body parsing for the TTS route
+  app.use(express.json({ limit: '500mb' })); // Enable JSON body parsing with large limit
+  app.use(express.urlencoded({ limit: '500mb', extended: true }));
+
+  app.post("/api/parse-document", async (req, res) => {
+    try {
+      const { name, data, type } = req.body;
+      if (!data) return res.status(400).json({ error: "Missing file data" });
+
+      const base64Data = data.split(',')[1] || data;
+      const buffer = Buffer.from(base64Data, 'base64');
+      
+      let textContent = '';
+      
+      const ext = (name.split('.').pop() || '').toLowerCase();
+      const officeTypes = ['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'pdf', 'rtf', 'csv', 'epub'];
+
+      if (officeTypes.includes(ext)) {
+        const { parseOffice } = await import('officeparser');
+        textContent = await parseOffice(buffer);
+      } else if (ext === 'zip' || type === 'application/zip' || type === 'application/x-zip-compressed') {
+        const JSZip = (await import('jszip')).default;
+        const zip = await JSZip.loadAsync(buffer);
+        const files = [];
+        
+        for (const [filename, zipEntry] of Object.entries(zip.files)) {
+          if (!zipEntry.dir) {
+            const innerExt = (filename.split('.').pop() || '').toLowerCase();
+            try {
+              if (officeTypes.includes(innerExt)) {
+                 const innerBuffer = await zipEntry.async("nodebuffer");
+                 const { parseOffice } = await import('officeparser');
+                 const content = await parseOffice(innerBuffer);
+                 files.push(`--- File: ${filename} ---\n${content}\n`);
+              } else if (innerExt.match(/^(txt|md|json|js|ts|jsx|tsx|py|csv|xml|html|css|java|c|cpp|cs|php|rb|go|rs|swift|kt|sh|bat)$/i) || filename.startsWith('.')) {
+                 const content = await zipEntry.async("text");
+                 files.push(`--- File: ${filename} ---\n${content}\n`);
+              } else {
+                 files.push(`--- File: ${filename} (Skipped non-text/office file) ---\n`);
+              }
+            } catch (e) {
+              files.push(`--- File: ${filename} (Could not parse) ---\n`);
+            }
+          }
+        }
+        textContent = files.join('\n');
+      } else {
+        // Try parsing as raw text as fallback
+        textContent = buffer.toString('utf-8');
+      }
+
+      res.json({ textContent });
+    } catch (e: any) {
+      console.error("[Parse Document] Error:", e);
+      res.status(500).json({ error: e.message || "Failed to parse document" });
+    }
+  });
 
   app.post("/api/generate-image", async (req, res) => {
     try {
@@ -859,15 +914,17 @@ async function startServer() {
       });
       
       if (action === "edit" && base64ImageData && mimeType) {
+        const { RawReferenceImage } = await import("@google/genai");
+        const rawRef = new RawReferenceImage();
+        rawRef.referenceId = 1;
+        rawRef.referenceImage = { imageBytes: base64ImageData, mimeType: mimeType };
+
         // According to the new SDK, editImage can be used.
         // Or we can fallback to generateContent if editImage is not easily accessible.
         const response = await ai.models.editImage({
           model: 'imagen-3.0-capability-001',
           prompt: `${prompt}. IMPORTANT: Ensure the editing looks completely natural and not like AI editing.`,
-          referenceImages: [{
-            base64: base64ImageData,
-            mimeType: mimeType
-          }],
+          referenceImages: [rawRef],
           config: {
             numberOfImages: 1,
             outputMimeType: 'image/jpeg',

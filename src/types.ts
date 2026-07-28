@@ -12,7 +12,7 @@ export interface Message {
   text: string;
   images?: string[];
   videos?: string[];
-  files?: { name: string, data: string, type: string }[];
+  files?: { name: string, data: string, type: string, textContent?: string }[];
   generatedImage?: string;
   suggestions?: string[];
   groundingMetadata?: any;

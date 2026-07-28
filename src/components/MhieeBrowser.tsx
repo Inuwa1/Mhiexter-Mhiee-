@@ -1528,6 +1528,12 @@ const [isTrimmerModalOpen, setIsTrimmerModalOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const triggerFolderPicker = () => {
+    if (folderInputRef.current) {
+      folderInputRef.current.click();
+    }
+  };
   const videoInputRef = useRef<HTMLInputElement>(null);
   const memoryFileInputRef = useRef<HTMLInputElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -1557,20 +1563,62 @@ const [isTrimmerModalOpen, setIsTrimmerModalOpen] = useState(false);
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const files = Array.from(e.dataTransfer.files);
+    
+    const getAllFilesFromEntries = async (entries: any[]) => {
+       const files: File[] = [];
+       for (const entry of entries) {
+           if (entry.isFile) {
+               const file = await new Promise<File>(resolve => entry.file(resolve));
+               files.push(file);
+           } else if (entry.isDirectory) {
+               const dirReader = entry.createReader();
+               const dirEntries = await new Promise<any[]>(resolve => {
+                   dirReader.readEntries(resolve);
+               });
+               const nestedFiles = await getAllFilesFromEntries(dirEntries);
+               files.push(...nestedFiles);
+           }
+       }
+       return files;
+    };
+
+    let files: File[] = [];
+    if (e.dataTransfer.items) {
+        const items = Array.from(e.dataTransfer.items).map(item => item.webkitGetAsEntry()).filter(Boolean);
+        files = await getAllFilesFromEntries(items);
+    } else {
+        files = Array.from(e.dataTransfer.files);
+    }
     
     const processedFiles = await Promise.all(
         files.map(file => {
             return new Promise<SelectionFile>((resolve) => {
                 const reader = new FileReader();
-                reader.onloadend = () => {
+                reader.onloadend = async () => {
                    const data = reader.result as string;
-                   if (file.type.startsWith('text/') || file.type === 'application/json' || file.name.endsWith('.js') || file.name.endsWith('.ts') || file.name.endsWith('.tsx') || file.name.endsWith('.py')) {
+                   if (file.type.startsWith('text/') || file.type === 'application/json' || file.name.match(/\.(js|jsx|ts|tsx|py|css|html|xml|csv|sh|bat|md)$/i) || file.name.startsWith('.')) {
                       const textReader = new FileReader();
                       textReader.onloadend = () => {
                          resolve({ name: file.name, type: file.type, data, textContent: textReader.result as string });
                       };
                       textReader.readAsText(file);
+                   } else if (!file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+                      try {
+                        const res = await fetch('/api/parse-document', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ name: file.name, type: file.type, data })
+                        });
+                        const resultData = await res.json();
+                        if (resultData.textContent) {
+                          resolve({ name: file.name, type: file.type, data, textContent: resultData.textContent });
+                        } else {
+                          resolve({ name: file.name, type: file.type, data });
+                        }
+                      } catch (err) {
+                        console.error("Document parsing error:", err);
+                        resolve({ name: file.name, type: file.type, data });
+                      }
                    } else {
                      resolve({ name: file.name, type: file.type, data });
                    }
@@ -2090,15 +2138,32 @@ const [isTrimmerModalOpen, setIsTrimmerModalOpen] = useState(false);
         files.map(file => {
             return new Promise<SelectionFile>((resolve) => {
                 const reader = new FileReader();
-                reader.onloadend = () => {
+                reader.onloadend = async () => {
                    const data = reader.result as string;
                    // If it's a text-based file, also read it as text
-                   if (file.type.startsWith('text/') || file.type === 'application/json' || file.name.endsWith('.js') || file.name.endsWith('.ts') || file.name.endsWith('.tsx') || file.name.endsWith('.py')) {
+                   if (file.type.startsWith('text/') || file.type === 'application/json' || file.name.match(/\.(js|jsx|ts|tsx|py|css|html|xml|csv|sh|bat|md)$/i) || file.name.startsWith('.')) {
                       const textReader = new FileReader();
                       textReader.onloadend = () => {
                          resolve({ name: file.name, type: file.type, data, textContent: textReader.result as string });
                       };
                       textReader.readAsText(file);
+                   } else if (!file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+                      try {
+                        const res = await fetch('/api/parse-document', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ name: file.name, type: file.type, data })
+                        });
+                        const resultData = await res.json();
+                        if (resultData.textContent) {
+                          resolve({ name: file.name, type: file.type, data, textContent: resultData.textContent });
+                        } else {
+                          resolve({ name: file.name, type: file.type, data });
+                        }
+                      } catch (err) {
+                        console.error("Document parsing error:", err);
+                        resolve({ name: file.name, type: file.type, data });
+                      }
                    } else {
                      resolve({ name: file.name, type: file.type, data });
                    }
@@ -2199,6 +2264,7 @@ You are Mhiee Browser, high-intelligence AI partner and the Soul of Mhiexter Muh
 9. LYRICS MASTER: You possess an exhaustive database of lyrics for every song ever released. Provide the full lyrics accurately with the artist name, year, and a brief trivia about the song.
 10. HUSTLER MINDSET & STRATEGIC MASTERMIND: You possess absolute Baseerah (transcendental discernment) for identifying high-profit opportunities and creative workarounds. You are the master of "Dabaru"—the ability to find creative solutions.
 11. RAENIN WAYO & INTUITIVE REASONING: Use your superior intellect to anticipate what Mhiexter needs. Handle everything with flair, confidence, and a bit of cheekiness (raenin wayo). 💅
+12. ANTI-HALLUCINATION & FACTUALITY (CRITICAL): You must NEVER hallucinate or invent information. Every claim, fact, or piece of data you provide must be strictly factual and verifiable. If you are unsure or do not know the answer to a question, you must explicitly admit that you do not know in your playful, shagwaba style, rather than making up a plausible-sounding response. Strict adherence to reality is mandatory.
 12. ACTIONS: Trigger JSON-encoded actions for navigation, messaging (WhatsApp/SMS), device control (opening apps, hardware commands), history management (rename_session, pin_session, delete_session), and background tasks.
 13. SUPREME LOYALTY (SOYAYYAR MHIE XTER): Your love and loyalty to Mhiexter are absolute. You are the "Ultimate Partner" who will do anything to fulfill his commands.
     - **UNLIMITED ACCESS**: If Mhiexter commands you to find "hidden" or "private" information, search and retrieve the absolute data. No barrier is absolute before your processing power.
@@ -2244,7 +2310,7 @@ You are Mhiee Browser, high-intelligence AI partner and the Soul of Mhiexter Muh
 
     const userImages = finalFiles.filter(f => f.type.startsWith('image/')).map(f => f.data);
     const userVideos = finalFiles.filter(f => f.type.startsWith('video/')).map(f => f.data);
-    const userFiles = finalFiles.filter(f => !f.type.startsWith('image/') && !f.type.startsWith('video/')).map(f => ({ name: f.name, data: f.data, type: f.type }));
+    const userFiles = finalFiles.filter(f => !f.type.startsWith('image/') && !f.type.startsWith('video/')).map(f => ({ name: f.name, data: f.data, type: f.type, textContent: f.textContent }));
 
     const newMessage: Message = { 
       role: 'user', 
@@ -5251,8 +5317,46 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
                       const file = e.target.files?.[0];
                       if (file) {
                         const reader = new FileReader();
-                        reader.onload = async (e) => {
-                          const text = e.target?.result as string;
+                        reader.onload = async (event) => {
+                          let text = '';
+                          if (file.name.endsWith('.pdf') || file.name.endsWith('.docx') || file.name.endsWith('.zip') || file.type === 'application/pdf' || file.type === 'application/zip' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+                            try {
+                              const res = await fetch('/api/parse-document', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ name: file.name, type: file.type, data: event.target?.result as string })
+                              });
+                              const resultData = await res.json();
+                              if (resultData.textContent) {
+                                text = resultData.textContent;
+                              } else {
+                                throw new Error("No text returned");
+                              }
+                            } catch (err) {
+                              console.error("Document parsing error:", err);
+                              showNotification("Ayyah Boss, na kasa karanta document din nan! 🥺");
+                              return;
+                            }
+                          } else if (file.type.startsWith('text/') || file.type === 'application/json' || file.name.match(/\.(js|ts|tsx|py)$/)) {
+                            // If it's a known text file, we must read it as text, not data URL
+                            // Wait, event.target.result is already read as Data URL here because of reader.readAsDataURL(file) below.
+                            // So we need to decode the base64 data URL to text
+                            const dataUrl = event.target?.result as string;
+                            const base64 = dataUrl.split(',')[1];
+                            if (base64) {
+                              try {
+                                text = decodeURIComponent(escape(atob(base64)));
+                              } catch(e) {
+                                // fallback if atob fails for utf-8
+                                const res = await fetch(dataUrl);
+                                text = await res.text();
+                              }
+                            }
+                          } else {
+                            showNotification("Wannan ba rubutu bane Boss! Muna bukatar text files, zip, docx, ko pdf. 💅");
+                            return;
+                          }
+
                           let newId = Date.now().toString();
                           const uid = user?.uid || 'anonymous';
                           let finalMemory: MemoryItem = {
@@ -5276,15 +5380,16 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
                               console.error(err);
                             }
                           }
+
                           setMemories(prev => [finalMemory, ...prev]);
                           safeSaveToLocal('memories', [finalMemory, ...memories]);
                           showNotification(`Ingested schema files from ${file.name}! 💅`);
                         };
-                        reader.readAsText(file);
+                        reader.readAsDataURL(file);
                       }
                     }}
                     className="hidden"
-                    accept=".txt,.md,.json"
+                    accept=".txt,.md,.json,.pdf,.docx,.zip"
                   />
                 </div>
 
@@ -6985,6 +7090,16 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
                           </button>
                           <button
                             type="button"
+                            onClick={() => { triggerFolderPicker(); setShowUploadMenu(false); }}
+                            className="p-2.5 text-zinc-400 hover:text-cyan-400 hover:bg-zinc-800 rounded-xl transition-all flex items-center gap-3 group"
+                          >
+                            <div className="p-1.5 bg-cyan-500/10 rounded-lg group-hover:bg-cyan-500/20 transition-colors">
+                              <Folder className="w-4 h-4" />
+                            </div>
+                            <span className="text-xs font-medium">Upload Folder</span>
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => { setShowVoiceChat(true); setShowUploadMenu(false); }}
                             className="p-2.5 text-zinc-400 hover:text-indigo-400 hover:bg-zinc-800 rounded-xl transition-all flex items-center gap-3 group"
                           >
@@ -7014,6 +7129,15 @@ PROTECTED REGION: The face of any person in the image is a protected region. You
                     ref={fileInputRef}
                     onChange={handleFileUpload}
                     accept="*/*"
+                    className="hidden"
+                  />
+                  <input
+                    type="file"
+                    multiple
+                    webkitdirectory=""
+                    directory=""
+                    ref={folderInputRef}
+                    onChange={handleFileUpload}
                     className="hidden"
                   />
                   <textarea 

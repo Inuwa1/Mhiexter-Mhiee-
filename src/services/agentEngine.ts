@@ -42,7 +42,7 @@ Array<{
   let tasks: TaskNode[] = [];
   try {
     const result = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       contents: prompt,
       config: {
         responseMimeType: 'application/json'
@@ -162,7 +162,7 @@ Respond ONLY with a standard raw JSON structure:
 
   try {
     const result = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       contents: prompt,
       config: {
         responseMimeType: 'application/json'
@@ -234,7 +234,7 @@ export async function executeAgentPipeline(
             logCallback(`[WEB_SEEK] Connecting orbital research lines. Searching: "${currentInput}"...`);
             const ai = new GoogleGenAI({ apiKey });
             const result = await ai.models.generateContent({
-              model: 'gemini-2.5-flash',
+              model: 'gemini-3.8-flash',
               contents: `Collect top mechatronics, and pricing data about: "${currentInput}". Retrieve top 5 models under 500k naira in Nigeria, include RAM, storage, CPU and price specs if available. Provide URLs and actual reviews.`,
               config: {
                 tools: [{ googleSearch: {} }]
@@ -248,7 +248,7 @@ export async function executeAgentPipeline(
             const ai = new GoogleGenAI({ apiKey });
             const comparePrompt = `Analyze, calculate, and weigh these options:\n${databaseContext}\nCriteria: "${currentInput}"\nGenerate a clean comparative markdown table with technical specifications, mechatronic mecha power, and purchase value recommendation ratings.`;
             const result = await ai.models.generateContent({
-              model: 'gemini-2.5-flash',
+              model: 'gemini-3.8-flash',
               contents: comparePrompt
             });
             outputResult = result.text || "Comparison calculation empty.";
@@ -259,7 +259,7 @@ export async function executeAgentPipeline(
             const ai = new GoogleGenAI({ apiKey });
             const reportPrompt = `Compile a stunning, fully detailed mechatronics and budget performance report based on this accumulated knowledge:\n${databaseContext}\n\nFormatting details: "${currentInput}". Make sure it is polished, comprehensive, and includes an actionable purchase matrix.`;
             const result = await ai.models.generateContent({
-              model: 'gemini-2.5-flash',
+              model: 'gemini-3.8-flash',
               contents: reportPrompt
             });
             outputResult = result.text || "Report creation empty.";

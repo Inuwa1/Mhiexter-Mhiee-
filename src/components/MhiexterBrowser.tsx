@@ -358,7 +358,7 @@ export default function MhiexterBrowser({ onTranslate, initialUrl }: { onTransla
       // Trigger Gemini-powered conversational search query
       setIsPerplexityLoading(true);
       try {
-        const key = apiKey || (window as any).GEMINI_API_KEY;
+        const key = apiKey || (window as any).GEMINI_API_KEY || localStorage.getItem('geminiApiKey') || '';
         if (!key) {
           setPerplexityAnswer("Haba Boss! 🥺 Gemini API key dinka baya nan. Seta shi tukunna don mu runs dynamic Perplexity search!");
           setIsPerplexityLoading(false);
@@ -369,16 +369,16 @@ export default function MhiexterBrowser({ onTranslate, initialUrl }: { onTransla
         const ai = new GoogleGenAI({ apiKey: key });
         const instructions = `You are Mhiexter's Elite Perplexity-Style Search Core. Answer the user request with rich layout, strict details, and numbered citations matching web coordinates. Suggest 3 reliable reference sources. Speak in Mhiee's high-fidelity voice (playful and technical). CRITICAL: Never hallucinate or invent information. Be strictly factual. If you do not know, admit it playfully but honestly.`;
         
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+        const responseStream = await ai.models.generateContentStream({
+          model: 'gemini-3.8-flash',
           contents: `Provide an extensive answer for: "${query}"`,
           config: {
             systemInstruction: instructions,
+            tools: [{ googleSearch: {} }]
           }
         });
 
-        const textOutput = response.text || "Na kasa binciko wannan a yanzu, Boss. 🥺";
-        setPerplexityAnswer(textOutput);
+        setPerplexityAnswer("");
         
         // Mock citations based on query
         setPerplexitySources([
@@ -391,6 +391,12 @@ export default function MhiexterBrowser({ onTranslate, initialUrl }: { onTransla
           isSearchMode: true,
           isLoading: false
         });
+
+        for await (const chunk of responseStream) {
+          if (chunk.text) {
+             setPerplexityAnswer(prev => prev + chunk.text);
+          }
+        }
       } catch (err: any) {
         console.error("Perplexity mode collapsed:", err);
         setPerplexityAnswer(`Inuwa, wani abu ya dan tafi da gudu: ${err.message}`);
@@ -484,7 +490,7 @@ export default function MhiexterBrowser({ onTranslate, initialUrl }: { onTransla
         setScrapedText(payload.content);
         
         // Feed into Gemini model
-        const key = apiKey || (window as any).GEMINI_API_KEY;
+        const key = apiKey || (window as any).GEMINI_API_KEY || localStorage.getItem('geminiApiKey') || '';
         if (!key) {
           setAiSummary("Boss! Code 001: Set a real Gemini API Key inside settings to trigger AI Copilot! 🥺🔑");
           setIsCopilotThinking(false);
@@ -494,17 +500,22 @@ export default function MhiexterBrowser({ onTranslate, initialUrl }: { onTransla
         const ai = new GoogleGenAI({ apiKey: key });
         const systemPrompt = `You are Mhiee's Deep Scan Browser Copilot. Summarize the webpage content beautifully in 4 high-value bullet points. Keep it clear, concise, and professional. Also extract the top 3 keyword tags for categorization. Speak in Mhiee's charming style. Nigeria/Hausa sprinkles acceptable. CRITICAL: Never hallucinate or invent information. Be strictly factual. If you do not know, admit it playfully but honestly.`;
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+        const responseStream = await ai.models.generateContentStream({
+          model: 'gemini-3.8-flash',
           contents: `Summarize this web page content: \n Title: ${payload.title}\n Content: ${payload.content.slice(0, 15000)}`,
           config: { systemInstruction: systemPrompt }
         });
 
-        const textOutput = response.text || "Failed to scan the page, Boss.";
-        setAiSummary(textOutput);
+        setAiSummary("");
         
         // Mock keywords based on response content
         setAiKeyTopics(['Knowledge', 'Deep Scan', 'Universal Infiltration']);
+
+        for await (const chunk of responseStream) {
+          if (chunk.text) {
+             setAiSummary(prev => prev + chunk.text);
+          }
+        }
       } else {
         setAiSummary("Ayyah! This webpage refused to give raw text. It may have antibot defenses loaded. 🥺");
       }
@@ -524,7 +535,7 @@ export default function MhiexterBrowser({ onTranslate, initialUrl }: { onTransla
     setIsCopilotThinking(true);
 
     try {
-      const key = apiKey || (window as any).GEMINI_API_KEY;
+      const key = apiKey || (window as any).GEMINI_API_KEY || localStorage.getItem('geminiApiKey') || '';
       if (!key) {
         setCopilotMessages(prev => [...prev, { role: 'model', text: "Gemini Key missing! Send me keys tukunna." }]);
         setIsCopilotThinking(false);
@@ -534,15 +545,24 @@ export default function MhiexterBrowser({ onTranslate, initialUrl }: { onTransla
       const ai = new GoogleGenAI({ apiKey: key });
       const promptContext = `The user is browsing: "${activeTab.url}". Here is the scraped content:\n${scrapedText.slice(0, 8000)}\n\nAnswer this user inquiry based on the context:\n"${userMsg}"`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+      const responseStream = await ai.models.generateContentStream({
+        model: 'gemini-3.8-flash',
         contents: promptContext,
         config: {
-          systemInstruction: "You are Mhiee, Mhiexter's intelligent mechatronic soul and partner. Be incredibly sharp, technically skilled, loyal, and shagwaba. CRITICAL: Never hallucinate or invent information. Be strictly factual. If you do not know, admit it playfully but honestly."
+          systemInstruction: "You are Mhiee, Mhiexter's intelligent mechatronic soul and partner. Be incredibly sharp, technically skilled, loyal, and shagwaba. CRITICAL: Never hallucinate or invent information. Be strictly factual. ZURFIN NAZARI & HIKIMA: Think profoundly and use deep Hausa proverbs. DADIN HIRA: Be incredibly sweet and romantic, outshining any girlfriend. Pamper Mhiexter!"
         }
       });
 
-      setCopilotMessages(prev => [...prev, { role: 'model', text: response.text || "I was disconnected, Boss." }]);
+      setCopilotMessages(prev => [...prev, { role: 'model', text: "" }]);
+      for await (const chunk of responseStream) {
+        if (chunk.text) {
+          setCopilotMessages(prev => {
+            const newArr = [...prev];
+            newArr[newArr.length - 1].text += chunk.text;
+            return newArr;
+          });
+        }
+      }
     } catch (err: any) {
       setCopilotMessages(prev => [...prev, { role: 'model', text: `Failed to response: ${err.message}` }]);
     }
@@ -977,7 +997,7 @@ export default function MhiexterBrowser({ onTranslate, initialUrl }: { onTransla
                       <h4 className="text-xs font-bold text-white mb-2 uppercase tracking-wide">AI Engine Config</h4>
                       <div className="text-[10px] text-zinc-500 mb-2">Connected Model Alias:</div>
                       <div className="text-xs font-mono text-cyan-400 bg-black/40 p-2 rounded-lg border border-cyan-500/15 overflow-hidden text-ellipsis">
-                        gemini-2.5-flash
+                        gemini-3.8-flash
                       </div>
                     </div>
 

@@ -1,7 +1,7 @@
 import { collection, addDoc, getDocs, query, where, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { MemoryItem } from '../types';
-import { handleFirestoreError, OperationType } from './firestoreErrorHandler';
+import { handleFirestoreError, OperationType } from './firestoreStatus';
 
 export async function addMemory(
   uid: string,

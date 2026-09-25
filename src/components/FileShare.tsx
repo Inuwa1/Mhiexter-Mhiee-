@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { Share2, Download, Upload, CheckCircle, XCircle, Loader2, Copy, Camera } from 'lucide-react';
+import { generateAndDownloadFile } from '../lib/fileUtils';
 import { AnimatePresence } from 'motion/react';
 
 const CHUNK_SIZE = 16384; // 16KB chunks for WebRTC DataChannel
@@ -49,7 +50,7 @@ export default function FileShare() {
         cameraVideoRef.current.srcObject = stream;
       }
     } catch (err) {
-      console.error("Camera error:", err);
+      console.warn("Camera error:", err);
       // Fallback to any camera
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -223,21 +224,15 @@ export default function FileShare() {
             // File transfer complete
             const meta = incomingFileMetaRef.current;
             const blob = new Blob(receiveBufferRef.current, { type: meta?.type || 'application/octet-stream' });
-            const url = URL.createObjectURL(blob);
             
             // Trigger download
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = meta?.name || 'downloaded-file';
-            a.click();
+            generateAndDownloadFile(meta?.name || 'downloaded-file', blob);
             
             receiveBufferRef.current = [];
             setIsTransferring(false);
             setTransferProgress(100);
             setTransferComplete(true);
             setStatus('File received successfully!');
-            
-            setTimeout(() => URL.revokeObjectURL(url), 10000);
           }
         } catch (e) {
           console.error("Error parsing DataChannel message:", e);

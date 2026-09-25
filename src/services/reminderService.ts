@@ -1,7 +1,7 @@
 import { doc, getDocs, setDoc, collection, deleteDoc, query, where, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Reminder } from '../types';
-import { handleFirestoreError, OperationType } from './firestoreErrorHandler';
+import { handleFirestoreError, OperationType } from './firestoreStatus';
 
 export async function fetchReminders(uid: string): Promise<Reminder[]> {
   const path = `users/${uid}/reminders`;

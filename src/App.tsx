@@ -4,14 +4,14 @@
  */
 
 import { useState, useRef, ChangeEvent, useEffect, MouseEvent, DragEvent } from 'react';
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Settings, MonitorPlay, UploadCloud, Share2, X, Globe, Image as ImageIcon, Video, Zap, Sparkles } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Settings, MonitorPlay, UploadCloud, Share2, X, Globe, Image as ImageIcon, Video, Zap, Sparkles, Music } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SelectionFile } from './types';
 import FileShare from './components/FileShare';
 import MhieeBrowser from './components/MhieeBrowser';
 import VoiceChat from './components/VoiceChat';
 import PhotoStudio from './components/PhotoStudio';
-import { SpeedInsights } from '@vercel/speed-insights/react';
+import MelodyStudio from './components/MelodyStudio';
 
 export default function App() {
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
@@ -42,7 +42,7 @@ export default function App() {
   const [previewTime, setPreviewTime] = useState(0);
   const [previewPosition, setPreviewPosition] = useState(0);
   const [showPreview, setShowPreview] = useState(false);
-  const [activeTab, setActiveTab] = useState<'video' | 'photo'>('video');
+  const [activeTab, setActiveTab] = useState<'video' | 'photo' | 'music'>('video');
 
   useEffect(() => {
     const fetchConfig = async (retries = 3) => {
@@ -481,6 +481,17 @@ export default function App() {
               <ImageIcon className="w-4 h-4" />
               Photo Studio
             </button>
+            <button
+              onClick={() => setActiveTab('music')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all ${
+                activeTab === 'music' 
+                  ? 'bg-amber-500 text-black font-semibold shadow-lg shadow-amber-500/20' 
+                  : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+              }`}
+            >
+              <Music className="w-4 h-4" />
+              Melody Lab
+            </button>
           </div>
         </div>
         
@@ -774,15 +785,16 @@ export default function App() {
           </div>
         )}
         </div>
-      ) : (
+      ) : activeTab === 'photo' ? (
         <PhotoStudio 
           onShare={(file) => {
             setPendingFiles([file]);
             setShowBrowser(true);
           }} 
         />
+      ) : (
+        <MelodyStudio />
       )}
-      <SpeedInsights />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { UserProfile, UserPreferences } from '../types';
-import { handleFirestoreError, OperationType } from './firestoreErrorHandler';
+import { handleFirestoreError, OperationType } from './firestoreStatus';
 
 export async function fetchUserProfile(uid: string): Promise<UserProfile | null> {
   const path = `users/${uid}`;

@@ -1,7 +1,7 @@
 import { doc, getDocs, setDoc, collection, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { DownloadTask } from '../types';
-import { handleFirestoreError, OperationType } from './firestoreErrorHandler';
+import { handleFirestoreError, OperationType } from './firestoreStatus';
 
 export async function fetchDownloadTasks(uid: string): Promise<DownloadTask[]> {
   const path = `users/${uid}/downloads`;

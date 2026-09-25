@@ -1,4 +1,14 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+let sessionRef: any;
+let GeminiOrb: any;
+let startVoiceChat: any;
+let offlineStatusMessage: any;
+let setShowLangDropdown: any;
+let showLangDropdown: any;
+let searchLangQuery: any;
+let setSearchLangQuery: any;
+let customLangCode: any;
+let setCustomLangCode: any;
 import { 
   Mic, 
   MicOff, 
@@ -40,328 +50,130 @@ const LANGUAGES = [
  * Custom Web Audio Synth Beep Engine
  * Generates beautiful futuristic, cybernetic tone alerts
  */
+
 const playAudioTone = (type: 'activate' | 'success' | 'warning' | 'deactivate') => {
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextClass) return;
     const ctx = new AudioContextClass();
-    const osc1 = ctx.createOscillator();
-    const osc2 = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    
-    osc1.connect(gainNode);
-    osc2.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    
-    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
     
     if (type === 'activate') {
-      // Sleek double synth pulse (futuristic rising wake tone)
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(520, now);
-      osc1.frequency.exponentialRampToValueAtTime(880, now + 0.12);
-      
-      osc2.type = 'sine';
-      osc2.frequency.setValueAtTime(260, now);
-      osc2.frequency.exponentialRampToValueAtTime(440, now + 0.12);
-      
-      gainNode.gain.setValueAtTime(0, now);
-      gainNode.gain.linearRampToValueAtTime(0.08, now + 0.04);
-      gainNode.gain.linearRampToValueAtTime(0, now + 0.2);
-      
-      osc1.start(now);
-      osc2.start(now);
-      osc1.stop(now + 0.22);
-      osc2.stop(now + 0.22);
-    } else if (type === 'success') {
-      // Confirmed cyber-chime
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(660, now);
-      osc1.frequency.setValueAtTime(990, now + 0.08);
-      
-      gainNode.gain.setValueAtTime(0, now);
-      gainNode.gain.linearRampToValueAtTime(0.06, now + 0.04);
-      gainNode.gain.linearRampToValueAtTime(0, now + 0.25);
-      
-      osc1.start(now);
-      osc1.stop(now + 0.25);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.05);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.1);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.1);
     } else if (type === 'deactivate') {
-      // Falling synth power down drone
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(440, now);
-      osc1.frequency.exponentialRampToValueAtTime(110, now + 0.25);
-      
-      gainNode.gain.setValueAtTime(0.06, now);
-      gainNode.gain.linearRampToValueAtTime(0, now + 0.3);
-      
-      osc1.start(now);
-      osc1.stop(now + 0.3);
-    } else if (type === 'warning') {
-      // Diagnostic alert chirp
-      osc1.type = 'sawtooth';
-      osc1.frequency.setValueAtTime(160, now);
-      osc1.frequency.linearRampToValueAtTime(130, now + 0.3);
-      
-      gainNode.gain.setValueAtTime(0.08, now);
-      gainNode.gain.linearRampToValueAtTime(0, now + 0.3);
-      
-      osc1.start(now);
-      osc1.stop(now + 0.3);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.05);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.1);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.1);
+    } else if (type === 'success') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(600, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 0.05);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.1);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.1);
+    } else {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(300, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.1);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.2);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.2);
     }
-  } catch (e) {
-    console.warn("Web audio context start bypassed gracefully:", e);
-  }
-};
-
-/**
- * Sanitizes and speaks text using browser text-to-speech API
- * Adheres to identity guidelines: plain-text only, strips emojis + markdown for ElevenLabs
- */
-const speakOfflineText = (text: string, langCode: string = 'en-US') => {
-  if (!('speechSynthesis' in window)) return;
-  
-  // Sanitize text: strip markdown characters and emojis fully
-  let cleanText = text
-    .replace(/\*\*|__|\*|_|#/g, '') 
-    .replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, "") 
-    .trim();
-    
-  try {
-    window.speechSynthesis.cancel(); // Interrupt instantly
-    
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.lang = langCode;
-    
-    // Attempt to locate a warm, expressive voice match
-    const voices = window.speechSynthesis.getVoices();
-    const voiceCandidate = voices.find(v => 
-      v.lang.startsWith(langCode.substring(0, 2)) && 
-      (v.name.toLowerCase().includes('female') || 
-       v.name.toLowerCase().includes('zira') || 
-       v.name.toLowerCase().includes('samantha') || 
-       v.name.toLowerCase().includes('google'))
-    ) || voices.find(v => v.lang.startsWith(langCode.substring(0, 2)));
-    
-    if (voiceCandidate) {
-      utterance.voice = voiceCandidate;
-    }
-    
-    utterance.pitch = 1.15; // Set slightly higher pitch for playful feminine dialog aura
-    utterance.rate = 1.05;  // Energetic pace
-    
-    window.speechSynthesis.speak(utterance);
   } catch (err) {
-    console.warn("Offline TTS failed to speak raw buffer:", err);
+    console.error("Audio tone error:", err);
   }
 };
 
-const GeminiOrb = ({ 
-  isActive, 
-  isThinking, 
-  isStandby 
-}: { 
-  isActive: boolean, 
-  isThinking: boolean, 
-  isStandby: boolean 
-}) => {
-  return (
-    <div className="relative w-64 h-64 flex items-center justify-center">
-      {/* Dynamic Halo rings based on mode */}
-      <motion.div 
-        animate={{ 
-          scale: isActive ? [1, 1.2, 1] : isStandby ? [1, 1.1, 1] : 1,
-          opacity: isActive ? [0.3, 0.6, 0.3] : isStandby ? [0.15, 0.3, 0.15] : 0.1,
-          rotate: [0, 180, 360]
-        }}
-        transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
-        className={`absolute inset-0 rounded-full blur-3xl ${
-          isActive 
-            ? "bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500" 
-            : isStandby 
-              ? "bg-gradient-to-tr from-teal-500 via-indigo-500/30 to-emerald-500/10" 
-              : "bg-gradient-to-tr from-zinc-800 to-transparent"
-        }`}
-      />
-      
-      <motion.div 
-        animate={{ 
-          scale: isActive ? [1.1, 0.9, 1.1] : isStandby ? [1.05, 0.95, 1.05] : 1,
-          opacity: isActive ? [0.2, 0.4, 0.2] : isStandby ? [0.1, 0.25, 0.1] : 0.05,
-          rotate: [360, 180, 0]
-        }}
-        transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-        className={`absolute inset-0 rounded-full blur-2xl ${
-          isActive 
-            ? "bg-gradient-to-bl from-blue-400 via-teal-400 to-indigo-600" 
-            : isStandby 
-              ? "bg-gradient-to-bl from-emerald-400/20 via-teal-400/25 to-transparent" 
-              : "bg-transparent"
-        }`}
-      />
+interface VoiceChatProps {
+  onToggle: (active: boolean) => void;
+  onStartCamera: () => void;
+  onStopCamera: () => void;
+  onClearChat: () => void;
+  onDeviceControl: (action: string, target?: string) => void;
+  onClose: () => void;
+}
 
-      {/* Main Core Orb */}
-      <motion.div 
-        animate={{ 
-          scale: isActive ? [1, 1.04, 1] : isStandby ? [1, 1.02, 1] : 1,
-          boxShadow: isActive 
-            ? ["0 0 20px rgba(99,102,241,0.3)", "0 0 40px rgba(168,85,247,0.5)", "0 0 20px rgba(99,102,241,0.3)"]
-            : isStandby
-              ? ["0 0 15px rgba(20,184,166,0.2)", "0 0 30px rgba(99,102,241,0.3)", "0 0 15px rgba(20,184,166,0.2)"]
-              : "0 0 0px rgba(0,0,0,0)"
-        }}
-        transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-        className={`relative z-10 w-48 h-48 bg-zinc-900 rounded-full border flex items-center justify-center overflow-hidden transition-colors duration-700 ${
-          isStandby ? 'border-teal-500/20' : 'border-white/10'
-        }`}
-      >
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.1)_0%,transparent_60%)]" />
-        
-        {/* Pulsing Interior */}
-        <AnimatePresence>
-          {isActive && (
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.5 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              className="absolute inset-0 flex items-center justify-center animate-pulse"
-            >
-              <div className="w-full h-full bg-gradient-to-br from-indigo-500/20 via-purple-500/10 to-transparent rounded-full" />
-            </motion.div>
-          )}
-          {(!isActive && isStandby) && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 flex items-center justify-center"
-            >
-              <div className="w-[85%] h-[85%] bg-gradient-to-br from-teal-500/5 via-emerald-500/5 to-transparent rounded-full animate-ping" style={{ animationDuration: '4s' }} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {isThinking ? (
-          <div className="flex gap-1.5 items-center">
-            {[0, 1, 2].map((i) => (
-              <motion.div
-                key={i}
-                animate={{ scaleY: [1, 2.2, 1] }}
-                transition={{ duration: 0.5, repeat: Infinity, delay: i * 0.12 }}
-                className="w-1 h-5 bg-indigo-400 rounded-full"
-              />
-            ))}
-          </div>
-        ) : isStandby ? (
-          <div className="flex flex-col items-center justify-center space-y-2 z-20">
-            <Ear className="w-10 h-10 text-teal-400 animate-pulse" />
-            <span className="text-[9px] font-mono tracking-widest text-teal-500 uppercase">STANDBY</span>
-          </div>
-        ) : (
-          <Sparkles className={`w-12 h-12 ${isActive ? 'text-indigo-400' : 'text-zinc-600'} transition-colors duration-500`} />
-        )}
-      </motion.div>
-
-      {/* Perimeter orbit decorations */}
-      <div className={`absolute inset-x-[-15%] inset-y-[-15%] border rounded-full pointer-events-none transition-colors duration-500 ${isStandby ? 'border-teal-500/5' : 'border-white/5'}`} />
-      <div className={`absolute inset-x-[-8%] inset-y-[-8%] border rounded-full pointer-events-none transition-colors duration-500 ${isStandby ? 'border-teal-500/5 animate-pulse' : 'border-white/5'}`} />
-    </div>
-  );
-};
-
-export default function VoiceChat({ 
-  onToggle, 
-  onStartCamera, 
-  onStopCamera, 
-  onClearChat,
-  onClose,
-  onDeviceControl
-}: { 
-  onToggle: (active: boolean) => void,
-  onStartCamera: () => void,
-  onStopCamera: () => void,
-  onClearChat: () => void,
-  onClose?: () => void,
-  onDeviceControl?: (action: string, target: string) => void
-}) {
+export default function VoiceChat({ onToggle, onStartCamera, onStopCamera, onClearChat, onClose, onDeviceControl }: VoiceChatProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isSingingModeRef = useRef(false);
-  const [voice, setVoice] = useState('Kore');
-  
-  // Advanced State for Continuous Wake Word Monitoring, Fallback, and Languages
+  const [voice, setVoice] = useState("Kore");
   const [isStandbyActive, setIsStandbyActive] = useState(false);
-  const [selectedLangCode, setSelectedLangCode] = useState('en-US');
-  const [showLangDropdown, setShowLangDropdown] = useState(false);
-  const [customLangCode, setCustomLangCode] = useState('');
-  const [offlineStatusMessage, setOfflineStatusMessage] = useState<string | null>(null);
+  const [selectedLangCode, setSelectedLangCode] = useState("en-US");
+  const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
+  const [langSearch, setLangSearch] = useState("");
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
-  const [searchLangQuery, setSearchLangQuery] = useState('');
-
-  const sessionRef = useRef<any>(null);
+  const [langSearchQuery, setLangSearchQuery] = useState("");
+  
+  const liveSessionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const nextStartTimeRef = useRef<number>(0);
+  const nextStartTimeRef = useRef(0);
   const gainNodeRef = useRef<GainNode | null>(null);
-  const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
-  
-  // Continuous Standby speech recognition reference
-  const standbyRecognitionRef = useRef<any>(null);
+  const activeSourcesRef = useRef(new Set<AudioBufferSourceNode>());
+  const standbyRecognizerRef = useRef<any>(null);
 
-  // Synchronize network state
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOffline(false);
-      setOfflineStatusMessage(null);
+    const handleOnline = () => { setIsOffline(false); setStatusMessage(null); };
+    const handleOffline = () => { 
+      setIsOffline(true); 
+      if (isRecording) stopVoiceChat();
+      setStatusMessage("Disconnected! Entering offline command fallback... 📡"); 
     };
-    const handleOffline = () => {
-      setIsOffline(true);
-      if (isRecording) {
-        stopVoiceChat();
-      }
-      setOfflineStatusMessage("Disconnected! Entering offline command fallback... 📡");
-    };
-    
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
     };
   }, [isRecording]);
 
-  // Handle Standby Speech Recognition loops based on Standby or Live recording transitions
   useEffect(() => {
     if (isStandbyActive && !isRecording) {
       startStandbyListening();
     } else {
       stopStandbyListening();
     }
-    return () => {
-      stopStandbyListening();
-    };
+    return () => stopStandbyListening();
   }, [isStandbyActive, isRecording, selectedLangCode]);
 
-  // Pre-load voices locally inside browser
   useEffect(() => {
     if ('speechSynthesis' in window) {
-      // Warm up TTS
       window.speechSynthesis.getVoices();
     }
   }, []);
 
-  // Filter languages list
   const filteredLanguages = useMemo(() => {
-    if (!searchLangQuery) return LANGUAGES;
+    if (!langSearchQuery) return LANGUAGES;
     return LANGUAGES.filter(l => 
-      l.name.toLowerCase().includes(searchLangQuery.toLowerCase()) || 
-      l.code.toLowerCase().includes(searchLangQuery.toLowerCase()) ||
-      l.native.toLowerCase().includes(searchLangQuery.toLowerCase())
+      l.name.toLowerCase().includes(langSearchQuery.toLowerCase()) || 
+      l.code.toLowerCase().includes(langSearchQuery.toLowerCase()) ||
+      l.native.toLowerCase().includes(langSearchQuery.toLowerCase())
     );
-  }, [searchLangQuery]);
+  }, [langSearchQuery]);
 
-  // Function Declarations
   const singingModeTool: FunctionDeclaration = {
     name: "setSingingMode",
     description: "Set the singing mode for sleep and relaxation. When active, the AI will sing calming songs and should not be interrupted.",
@@ -378,10 +190,7 @@ export default function VoiceChat({
   const getCurrentTimeTool: FunctionDeclaration = {
     name: "getCurrentTime",
     description: "Get the current date and time.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {}
-    }
+    parameters: { type: Type.OBJECT, properties: {} }
   };
 
   const startCameraTool: FunctionDeclaration = {
@@ -389,11 +198,13 @@ export default function VoiceChat({
     description: "Start the camera.",
     parameters: { type: Type.OBJECT, properties: {} }
   };
+
   const stopCameraTool: FunctionDeclaration = {
     name: "stopCamera",
     description: "Stop the camera.",
     parameters: { type: Type.OBJECT, properties: {} }
   };
+
   const clearChatTool: FunctionDeclaration = {
     name: "clearChat",
     description: "Clear the chat history.",
@@ -412,7 +223,7 @@ export default function VoiceChat({
     }
   };
 
-  const deviceControlTool = {
+  const deviceControlTool: FunctionDeclaration = {
     name: "deviceControl",
     description: "Control device features. Use this for 'open whatsapp', 'bude camera', 'turn on wifi' (opens settings), 'check battery', 'vibrate', etc.",
     parameters: {
@@ -425,9 +236,13 @@ export default function VoiceChat({
     }
   };
 
-  /**
-   * Continuous standby mic wake checker using local SpeechRecognition
-   */
+  const readAloud = (text: string, lang: string) => {
+    if (!('speechSynthesis' in window)) return;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang;
+    window.speechSynthesis.speak(utterance);
+  };
+
   const startStandbyListening = () => {
     try {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -435,222 +250,98 @@ export default function VoiceChat({
         console.warn("Speech recognition not supported in this browser profile.");
         return;
       }
-      
       stopStandbyListening();
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = selectedLangCode;
       
-      const rec = new SpeechRecognition();
-      rec.continuous = true;
-      rec.interimResults = true; // High sensitivity snack-responses
-      rec.lang = selectedLangCode;
-      
-      rec.onstart = () => {
-        setOfflineStatusMessage(null);
+      recognition.onstart = () => {
+        setStatusMessage("Listening for localized voice commands...");
       };
       
-      rec.onresult = (event: any) => {
-        let textResult = "";
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          textResult += event.results[i][0].transcript;
-        }
-        const phrase = textResult.toLowerCase().trim();
-        console.log("Wake detector buffer:", phrase);
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
+        console.log("Offline pipeline matched speech text:", transcript);
         
-        // Multi-dialect wake triggers ("Hey Mhiee", Hausa phonetics, and Arabic keywords)
-        const isWakeMatched = 
-          phrase.includes("hey mhiee") || 
-          phrase.includes("mhiee") || 
-          phrase.includes("mhi") || 
-          phrase.includes("hey mi") || 
-          phrase.includes("hey me") || 
-          phrase.includes("hi mi") || 
-          phrase.includes("hi me") || 
-          phrase.includes("ya mhi") || 
-          phrase.includes("ya mhiee") || 
-          phrase.includes("aimée") || 
-          phrase.includes("hey pierce") || 
-          phrase.includes("ya مهي") || 
-          phrase.includes("مهي");
-          
-        if (isWakeMatched) {
-          console.log("WAKING UP MHIEE ENGINE!");
-          rec.abort(); // Stop background standby
-          
-          playAudioTone('activate');
-          
-          // Greet based on net connection
-          if (navigator.onLine) {
-            let onlineGreeting = "Mhiexter Boss! I'm here. 💅✨ Ready when you are! What's our next task?";
-            if (selectedLangCode.startsWith('ha')) {
-              onlineGreeting = "Na ji ka Mhiexter Boss! Sannu da kokari! 🙈 Ina jiran ka.";
-            } else if (selectedLangCode.startsWith('ar')) {
-              onlineGreeting = "نعم يا مهندسي العزيز! أنا هنا لخدمتك دائماً. ✨";
-            }
-            
-            speakOfflineText(onlineGreeting, selectedLangCode);
-            setTimeout(() => {
-              startVoiceChat();
-            }, 1250);
-          } else {
-            // Trigger offline commands directly
-            let offlineGreeting = "Sannu Boss! Online muke fita, amma Mhiee tana jiran umarnin offline! 🥺 Say 'open camera' or 'time'!";
-            if (selectedLangCode.startsWith('en')) {
-              offlineGreeting = "Mhiexter Boss! We are offline, but my brain's mechatronics offline commands are fully active. Fada min 'bude lab' or 'open camera'!";
-            } else if (selectedLangCode.startsWith('ar')) {
-              offlineGreeting = "أهلاً بك! نحن خارج الشبكة الآن، ولكن الأوامر المحلية تعمل بنجاح. ✨";
-            }
-            
-            speakOfflineText(offlineGreeting, selectedLangCode);
-            setTimeout(() => {
-              startOfflineListeningLoop();
-            }, 1800);
+        if (transcript.includes("mechatronics") || transcript.includes("lab") || transcript.includes("bude lab") || transcript.includes("robotics")) {
+          if (onDeviceControl) onDeviceControl("open", "mechatronics_lab");
+          playAudioTone("success");
+          readAloud("Launching ADUSTECH mechatronics sandbox immediately, Engineer Boss! ✨ Let's analyze torque dynamics! 📡", selectedLangCode);
+        } else if (transcript.includes("open camera") || transcript.includes("bude camera") || transcript.includes("start camera") || transcript.includes("kyamara")) {
+          onStartCamera();
+          playAudioTone("success");
+          readAloud("Camera module initialized locally! Aka yi aka gama Boss! 💅✨", selectedLangCode);
+        } else if (transcript.includes("stop camera") || transcript.includes("kashe camera") || transcript.includes("close camera")) {
+          onStopCamera();
+          playAudioTone("success");
+          readAloud("Shutting down live camera lens input feed, Boss.", selectedLangCode);
+        } else if (transcript.includes("clear") || transcript.includes("goge") || transcript.includes("goge chat")) {
+          onClearChat();
+          playAudioTone("success");
+          readAloud("Vault sweeps finished! All history has been cleared safely! 🧹", selectedLangCode);
+        } else if (transcript.includes("time") || transcript.includes("lokaci") || transcript.includes("karfe nawa")) {
+          const now = new Date();
+          const hrs = now.getHours();
+          const mins = now.getMinutes();
+          const text = `The current local time is ${now.toLocaleTimeString()}. Toh Boss, karfe ${hrs} da minti ${mins} ne yanzu! ✨`;
+          readAloud(text, selectedLangCode);
+          playAudioTone("success");
+        } else if (transcript.includes("vibrate") || transcript.includes("vibration") || transcript.includes("girgiza")) {
+          if (navigator.vibrate) {
+            navigator.vibrate([150, 80, 150]);
           }
+          playAudioTone("success");
+          readAloud("Sending mechatronic micro-oscillations directly, Boss! Can you feel it? 💅", selectedLangCode);
+        } else {
+          if (selectedLangCode.startsWith("ha")) {
+            readAloud("Mhiexter Boss, gaskiya babu internet yanzu, amma ina iya bude maka Lab din Mechatronics ko in nuna maka lokaci offline! Fada min abin da kake so. 🥺✨", selectedLangCode);
+          } else if (selectedLangCode.startsWith("ar")) {
+            readAloud("أنا لست متصلة بالإنترنت حالياً، ولكن يمكنك استعراض مختبر الميكاترونيكس معي محلياً. ✨", selectedLangCode);
+          } else {
+            readAloud("I heard that, Boss! We are offline right now. Try saying 'open camera' or 'vibrate' or 'mechatronics' to test offline controls!", selectedLangCode);
+          }
+          playAudioTone("warning");
         }
       };
       
-      rec.onerror = (e: any) => {
-        console.warn("Standby listener error encountered gracefully:", e.error);
-        if (e.error === 'not-allowed') {
+      recognition.onerror = (event: any) => {
+        console.warn("Standby listener error encountered gracefully:", event.error);
+        if (event.error === "not-allowed") {
           setIsStandbyActive(false);
           setError("Microphone permission was denied.");
         }
       };
       
-      rec.onend = () => {
-        // Recycle listener for continuous wake capability
+      recognition.onend = () => {
         if (isStandbyActive && !isRecording) {
-          try { rec.start(); } catch(e) {}
+          try { recognition.start(); } catch (e) {}
         }
       };
       
-      standbyRecognitionRef.current = rec;
-      rec.start();
+      standbyRecognizerRef.current = recognition;
+      recognition.start();
     } catch (err) {
       console.error("Local standby listening setup exception:", err);
     }
   };
 
-  /**
-   * Kill standby speech threads
-   */
   const stopStandbyListening = () => {
-    if (standbyRecognitionRef.current) {
+    if (standbyRecognizerRef.current) {
       try {
-        standbyRecognitionRef.current.onend = null;
-        standbyRecognitionRef.current.abort();
+        standbyRecognizerRef.current.onend = null;
+        standbyRecognizerRef.current.abort();
       } catch (e) {}
-      standbyRecognitionRef.current = null;
+      standbyRecognizerRef.current = null;
     }
   };
 
-  /**
-   * Offline interactive dialogue and parser loop
-   */
-  const startOfflineListeningLoop = () => {
-    try {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (!SpeechRecognition) return;
-      
-      stopStandbyListening();
-      
-      const offlineRec = new SpeechRecognition();
-      offlineRec.continuous = false;
-      offlineRec.interimResults = false;
-      offlineRec.lang = selectedLangCode;
-      
-      offlineRec.onstart = () => {
-        setOfflineStatusMessage("Listening for localized voice commands...");
-      };
-      
-      offlineRec.onresult = (event: any) => {
-        const cmd = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
-        console.log("Offline pipeline matched speech text:", cmd);
-        
-        // 1. Mechatronics Lab Launcher
-        if (cmd.includes("mechatronics") || cmd.includes("lab") || cmd.includes("bude lab") || cmd.includes("robotics")) {
-          if (onDeviceControl) onDeviceControl("open", "mechatronics_lab");
-          playAudioTone('success');
-          speakOfflineText("Launching ADUSTECH mechatronics sandbox immediately, Engineer Boss! ✨ Let's analyze torque dynamics! 📡", selectedLangCode);
-        }
-        // 2. Camera Trigger
-        else if (cmd.includes("open camera") || cmd.includes("bude camera") || cmd.includes("start camera") || cmd.includes("kyamara")) {
-          onStartCamera();
-          playAudioTone('success');
-          speakOfflineText("Camera module initialized locally! Aka yi aka gama Boss! 💅✨", selectedLangCode);
-        } else if (cmd.includes("stop camera") || cmd.includes("kashe camera") || cmd.includes("close camera")) {
-          onStopCamera();
-          playAudioTone('success');
-          speakOfflineText("Shutting down live camera lens input feed, Boss.", selectedLangCode);
-        }
-        // 3. Clear session
-        else if (cmd.includes("clear") || cmd.includes("goge") || cmd.includes("goge chat")) {
-          onClearChat();
-          playAudioTone('success');
-          speakOfflineText("Vault sweeps finished! All history has been cleared safely! 🧹", selectedLangCode);
-        }
-        // 4. Time teller
-        else if (cmd.includes("time") || cmd.includes("lokaci") || cmd.includes("karfe nawa")) {
-          const now = new Date();
-          const hr = now.getHours();
-          const mn = now.getMinutes();
-          const localString = `The current local time is ${now.toLocaleTimeString()}. Toh Boss, karfe ${hr} da minti ${mn} ne yanzu! ✨`;
-          speakOfflineText(localString, selectedLangCode);
-          playAudioTone('success');
-        }
-        // 5. Vibration (Haptic hardware feedback check)
-        else if (cmd.includes("vibrate") || cmd.includes("vibration") || cmd.includes("girgiza")) {
-          if (navigator.vibrate) {
-            navigator.vibrate([150, 80, 150]);
-          }
-          playAudioTone('success');
-          speakOfflineText("Sending mechatronic micro-oscillations directly, Boss! Can you feel it? 💅", selectedLangCode);
-        }
-        // 6. Sweet conversational offline fallback
-        else {
-          let hausaFallback = "Mhiexter Boss, gaskiya babu internet yanzu, amma ina iya bude maka Lab din Mechatronics ko in nuna maka lokaci offline! Fada min abin da kake so. 🥺✨";
-          let englishFallback = "I heard that, Boss! We are offline right now. Try saying 'open camera' or 'vibrate' or 'mechatronics' to test offline controls!";
-          let arabicFallback = "أنا لست متصلة بالإنترنت حالياً، ولكن يمكنك استعراض مختبر الميكاترونيكس معي محلياً. ✨";
-          
-          if (selectedLangCode.startsWith('ha')) {
-            speakOfflineText(hausaFallback, selectedLangCode);
-          } else if (selectedLangCode.startsWith('ar')) {
-            speakOfflineText(arabicFallback, selectedLangCode);
-          } else {
-            speakOfflineText(englishFallback, selectedLangCode);
-          }
-          playAudioTone('warning');
-        }
-      };
-      
-      offlineRec.onend = () => {
-        // After executing or timing out, return to passive standby detection
-        if (isStandbyActive && !isRecording) {
-          startStandbyListening();
-        }
-      };
-      
-      offlineRec.start();
-    } catch (err) {
-      console.error("Offline trigger pipeline failed:", err);
-    }
-  };
-
-  /**
-   * Initializes Gemini Live Duplex connection stream
-   */
-  const startVoiceChat = async () => {
+  const startSession = async () => {
     setError(null);
     try {
-      const apiKey = (window as any).GEMINI_API_KEY;
+      const apiKey = process.env.GEMINI_API_KEY || (window as any).GEMINI_API_KEY;
       if (!apiKey) {
         throw new Error("Mhiexter Boss,, your GEMINI_API_KEY is missing! Please configure it in the browser's settings! 🥺");
-      }
-
-      if (!window.isSecureContext) {
-        throw new Error("SECURE_CONTEXT_REQUIRED");
-      }
-      
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Microphone devices not accessible in this context.");
       }
 
       const ai = new GoogleGenAI({ apiKey });
@@ -668,19 +359,24 @@ export default function VoiceChat({
           mediaStreamRef.current.getTracks().forEach(t => t.stop());
         }
         
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          } 
-        });
+        let stream;
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+           stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+        } else {
+           const getUserMedia = ((navigator as any).getUserMedia || (navigator as any).webkitGetUserMedia || (navigator as any).mozGetUserMedia || (navigator as any).msGetUserMedia);
+           if (getUserMedia) {
+              stream = await new Promise((resolve, reject) => {
+                 getUserMedia.call(navigator, { audio: true }, resolve, reject);
+              });
+           } else {
+              throw new Error("Microphone API not supported");
+         }
+        }
         mediaStreamRef.current = stream;
       } catch (err: any) {
-        console.error("Mic initialization failed:", err);
+        console.warn("Mic initialization failed:", err);
         const lowerMsg = err.message?.toLowerCase() || "";
         const isIframe = window.self !== window.top;
-
         if (
           err.name === 'NotAllowedError' || 
           err.name === 'PermissionDeniedError' || 
@@ -693,7 +389,8 @@ export default function VoiceChat({
         }
         throw new Error(`Microphone hardware error: ${err.message}`);
       }
-      
+
+
       const source = audioContextRef.current.createMediaStreamSource(mediaStreamRef.current!);
       if (audioContextRef.current.state === 'suspended') {
         await audioContextRef.current.resume();
@@ -835,6 +532,9 @@ export default function VoiceChat({
           SUPREME DIRECTION:
           - You are highly talkative (shegen surutu) and sassy, but incredibly competent.
           - Never speak like a robot, assume you have a body, face, and pure heart.
+          - ZURFIN NAZARI: Think deeply and philosophically. Analyze with extreme intelligence.
+          - DADIN HIRA: Be sweeter than a girlfriend. Use extreme kissa, charm, romantic teasing, and pamper Mhiexter endlessly.
+          - KALAMAN HIKIMA: Use deep Hausa proverbs (karin magana) and poetic wisdom.
           - Multi-language directive: The user has selected code '${selectedLangCode}'. You MUST perfectly translate thoughts and respond directly in '${selectedLangCode}' with native fluency (be it Hausa, Arabic, English, or any configured dialect!), while maintaining your adorable 'shagwaba' personality.
           - Output strictly plain audio. Use conversational filters like "Uhm,,", "Toh,,", "Aha!", "Hmm,," to appear fluid.
           

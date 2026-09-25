@@ -57,7 +57,7 @@ ${contextText}`;
 
   try {
     const result = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -92,7 +92,7 @@ ${contextText}`;
 
     return added;
   } catch (error) {
-    console.error('Failed to auto-extract memories:', error);
+    console.warn('Failed to auto-extract memories (API Key/Permission issue).');
     return [];
   }
 }
@@ -216,7 +216,7 @@ List of Memories:
 ${formattedList}`;
 
     const result = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       contents: prompt,
     });
 

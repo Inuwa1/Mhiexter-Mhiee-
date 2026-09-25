@@ -9,6 +9,7 @@ import { decomposeGoal, executeAgentPipeline } from '../services/agentEngine';
 import { fetchTaskPlans, deleteTaskPlan } from '../services/taskPlannerService';
 import { fetchReminders, deleteReminder } from '../services/reminderService';
 import { TaskPlan, TaskNode, Reminder } from '../types';
+import { generateAndDownloadFile } from '../lib/fileUtils';
 
 interface AgentControlCenterProps {
   onNotification: (msg: string) => void;
@@ -110,15 +111,7 @@ export default function AgentControlCenter({ onNotification, onReadAloud, onClos
 
   const handleDownloadReport = () => {
     if (!selectedReport) return;
-    const blob = new Blob([selectedReport], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `mhiee_autonomous_report_${Date.now()}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    generateAndDownloadFile(`mhiee_autonomous_report_${Date.now()}.md`, selectedReport, 'text/markdown');
     onNotification("Downloaded markdown report files! 💾");
   };
 

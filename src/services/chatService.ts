@@ -2,7 +2,7 @@ import { doc, setDoc, getDocs, collection, deleteDoc, query } from 'firebase/fir
 import { db } from '../firebase';
 import { ChatSession } from '../types';
 import { get, set as idbSet } from 'idb-keyval';
-import { handleFirestoreError, OperationType } from './firestoreErrorHandler';
+import { handleFirestoreError, OperationType } from './firestoreStatus';
 
 export async function saveSessionToCloud(uid: string, session: ChatSession): Promise<void> {
   const path = `users/${uid}/sessions/${session.id}`;

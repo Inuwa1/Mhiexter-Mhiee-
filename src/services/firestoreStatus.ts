@@ -48,6 +48,10 @@ export function handleFirestoreError(
     operationType,
     path,
   };
-  console.error("Firestore Error Captured:", JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  if (errInfo.error.includes("offline")) {
+    console.warn("Firestore Offline Warning:", JSON.stringify(errInfo));
+  } else {
+    console.error("Firestore Error Captured:", JSON.stringify(errInfo));
+  }
+  throw new Error(errInfo.error);
 }

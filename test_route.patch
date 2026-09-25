@@ -1,0 +1,10 @@
+--- server.ts
++++ server.ts
+@@ -910,6 +910,7 @@
+   
+   const imageRouterInstance = new ImageRouter();
+   app.post("/api/image-router", async (req, res) => {
++    console.log("Image router hit", !!process.env.GEMINI_API_KEY, !!process.env.FLUX_API_KEY);
+     try {
+       const response = await imageRouterInstance.route(req.body);
+       res.json(response);

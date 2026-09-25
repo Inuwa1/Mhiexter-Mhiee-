@@ -27,13 +27,15 @@ export default function PhotoStudio({ onShare }: PhotoStudioProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
   const [isObjectSelectionMode, setIsObjectSelectionMode] = useState(false);
-  const [activeFolder, setActiveFolder] = useState<'adjustments' | 'retouch' | 'face' | 'video' | null>(null);
+  const [activeFolder, setActiveFolder] = useState<'adjustments' | 'retouch' | 'face' | 'video' | 'generate' | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null);
   const [splitPosition, setSplitPosition] = useState(50);
   const [videoPrompt, setVideoPrompt] = useState('');
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
+  const [imageGenPrompt, setImageGenPrompt] = useState('');
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
 
   const imgRef = useRef<HTMLImageElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -117,7 +119,7 @@ export default function PhotoStudio({ onShare }: PhotoStudioProps) {
       const response = await callAiWithRetry((key) => {
         const aiInstance = new GoogleGenAI({ apiKey: key });
         return aiInstance.models.generateContent({
-          model: 'gemini-flash-latest',
+          model: 'gemini-3.8-flash',
           contents: {
             parts: [
               { inlineData: { mimeType: match1[1], data: match1[2] } },
@@ -220,44 +222,26 @@ export default function PhotoStudio({ onShare }: PhotoStudioProps) {
 
     try {
       const apiKey = (window as any).GEMINI_API_KEY;
-      const ai = new GoogleGenAI({ apiKey });
-      const match = baseImage.match(/^data:(image\/[a-zA-Z+.-]+);base64,(.+)$/);
-      if (!match) throw new Error("Invalid image format");
-
-      const mimeType = match[1];
-      const base64Data = match[2];
-
-      const response = await callAiWithRetry((key) => {
-        const aiInstance = new GoogleGenAI({ apiKey: key });
-        return aiInstance.models.generateContent({
-          model: 'gemini-flash-latest',
-          contents: {
-            parts: [
-              { inlineData: { mimeType, data: base64Data } },
-              { text: finalPrompt }
-            ]
-          }
-        });
+      
+      const res = await fetch("/api/image-router", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+              prompt: finalPrompt,
+              action: "edit",
+              images: [baseImage],
+              apiKey
+          })
       });
 
-      let newImage = null;
-      let textResponse = null;
-      const candidate = response?.candidates?.[0];
-
-      if (candidate?.finishReason === 'SAFETY') {
-        throw new Error("Image generation was blocked due to safety guidelines.");
+      if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.error || `Server error: ${res.status}`);
       }
 
-      if (candidate?.content?.parts) {
-        for (const part of candidate.content.parts) {
-          if (part.inlineData) {
-            newImage = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
-            break;
-          } else if (part.text) {
-            textResponse = part.text;
-          }
-        }
-      }
+      const data = await res.json();
+      let newImage = data.generatedImage;
+      let textResponse = data.textResponse;
 
       if (newImage) {
         setPreviewImageSrc(newImage);
@@ -320,7 +304,48 @@ export default function PhotoStudio({ onShare }: PhotoStudioProps) {
     document.body.removeChild(a);
   };
 
-  const handleVideoGeneration = async () => {
+  
+  const handleImageGeneration = async () => {
+    if (!imageGenPrompt) return;
+    setIsGeneratingImage(true);
+    setAiError(null);
+    try {
+        const apiKey = (window as any).GEMINI_API_KEY;
+        const res = await fetch("/api/image-router", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                prompt: imageGenPrompt,
+                action: "generate",
+                preferred_provider: "flux",
+                apiKey
+            })
+        });
+
+        if (!res.ok) {
+            const errorData = await res.json().catch(() => ({}));
+            throw new Error(errorData.error || `Server error: ${res.status}`);
+        }
+
+        const data = await res.json();
+        if (data.generatedImage) {
+            setImageSrc(data.generatedImage);
+            setPreviewImageSrc(null);
+            setCrop(undefined);
+            setCompletedCrop(undefined);
+            setImageName("generated_image.jpg");
+        } else {
+            throw new Error(data.textResponse || "Failed to generate image.");
+        }
+    } catch (err: any) {
+        console.error("Image Generation Error:", err);
+        setAiError(err.message || "An error occurred during image generation.");
+    } finally {
+        setIsGeneratingImage(false);
+    }
+  };
+
+const handleVideoGeneration = async () => {
     if (!videoPrompt || isGeneratingVideo) return;
     
     // Check for API key
@@ -719,7 +744,44 @@ export default function PhotoStudio({ onShare }: PhotoStudioProps) {
               </AnimatePresence>
             </div>
 
-            {/* Video Generation Folder */}
+            
+            {/* Image Generation Folder */}
+            <div className="border-b border-zinc-800">
+              <button 
+                onClick={() => setActiveFolder(activeFolder === 'generate' ? null : 'generate')} 
+                className="w-full p-4 text-left text-zinc-400 font-medium hover:text-white flex justify-between items-center"
+              >
+                Image Generation (FLUX-2)
+                <span>{activeFolder === 'generate' ? '−' : '+'}</span>
+              </button>
+              <AnimatePresence>
+                {activeFolder === 'generate' && (
+                  <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="p-4 flex flex-col gap-4">
+                      <textarea 
+                        value={imageGenPrompt}
+                        onChange={(e) => setImageGenPrompt(e.target.value)}
+                        placeholder="Describe the image you want to generate with FLUX-2..."
+                        className="w-full p-3 bg-zinc-800 text-white rounded-xl border border-zinc-700 focus:outline-none focus:border-indigo-500 resize-none h-24"
+                      />
+                      <button 
+                        onClick={handleImageGeneration}
+                        disabled={isGeneratingImage || !imageGenPrompt}
+                        className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-colors shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {isGeneratingImage ? 'Generating...' : 'Generate Image'}
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+{/* Video Generation Folder */}
             <div className="border-b border-zinc-800">
               <button 
                 onClick={() => setActiveFolder(activeFolder === 'video' ? null : 'video')} 

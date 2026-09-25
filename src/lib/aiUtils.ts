@@ -1,24 +1,50 @@
 import { GoogleGenAI } from '@google/genai';
 
-const MAX_RETRIES = 5;
-const INITIAL_DELAY = 2000; // 2 seconds
+const MAX_RETRIES = 3;
+const INITIAL_DELAY = 1500;
 
 let currentKeyIndex = 0;
 
-function getApiKey(): string {
-  const customKeys = (import.meta.env.VITE_GEMINI_API_KEYS || "").split(',').filter(Boolean);
-  const primaryKey = (window as any).GEMINI_API_KEY || (import.meta.env.VITE_GEMINI_API_KEY || "");
-  
-  const allKeys = [...customKeys];
-  if (primaryKey && !allKeys.includes(primaryKey)) {
-    allKeys.unshift(primaryKey);
+export function getApiKey(): string {
+  // 1. Check window object
+  const winKey = typeof window !== 'undefined' ? (window as any).GEMINI_API_KEY : null;
+  if (winKey && winKey !== 'MISSING_KEY' && winKey.trim()) return winKey.trim();
+
+  // 2. Check localStorage
+  const localKey = typeof localStorage !== 'undefined' ? localStorage.getItem('geminiApiKey') : null;
+  if (localKey && localKey !== 'MISSING_KEY' && localKey.trim()) return localKey.trim();
+
+  // 3. Check rotating keys
+  const customKeys = (import.meta.env.VITE_GEMINI_API_KEYS || "")
+    .split(',')
+    .map((k: string) => k.trim())
+    .filter((k: string) => k && k !== 'MISSING_KEY');
+  if (customKeys.length > 0) {
+    const key = customKeys[currentKeyIndex % customKeys.length];
+    currentKeyIndex++;
+    return key;
   }
 
-  if (allKeys.length === 0) return "";
-  
-  const key = allKeys[currentKeyIndex % allKeys.length];
-  currentKeyIndex++;
-  return key;
+  // 4. Check primary VITE env key
+  const primaryKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (primaryKey && primaryKey !== 'MISSING_KEY' && primaryKey.trim()) {
+    return primaryKey.trim();
+  }
+
+  return "";
+}
+
+function isAuthOrKeyError(status: any, message: string): boolean {
+  return (
+    status === 401 ||
+    status === 403 ||
+    status === 'PERMISSION_DENIED' ||
+    message.includes('API key not valid') ||
+    message.includes('API_KEY_INVALID') ||
+    message.includes('unregistered callers') ||
+    message.includes('PERMISSION_DENIED') ||
+    message.includes('MISSING_API_KEY')
+  );
 }
 
 export async function callAiWithRetry<T>(
@@ -26,14 +52,22 @@ export async function callAiWithRetry<T>(
   retries = MAX_RETRIES,
   delay = INITIAL_DELAY
 ): Promise<T> {
+  const key = getApiKey();
+  if (!key) {
+    throw new Error("MISSING_API_KEY: Gemini API Key is missing. Please add your key in Settings.");
+  }
+
   try {
-    const key = getApiKey();
     return await apiCall(key);
   } catch (error: any) {
-    // Check if error is 429, 500, or network-level
     const status = error?.status || error?.error?.code || error?.error?.status || (typeof error?.error === 'string' ? error.error : null);
     const message = error?.message || error?.error?.message || (typeof error === 'string' ? error : "");
     
+    // Auth and missing key errors should NEVER be retried
+    if (isAuthOrKeyError(status, message)) {
+      throw error;
+    }
+
     const isRetryable = 
       status === 429 || 
       status === 500 || 
@@ -71,14 +105,23 @@ export async function* streamAiWithRetry<T>(
   let currentDelay = delay;
 
   while (true) {
+    const key = getApiKey();
+    if (!key) {
+      throw new Error("MISSING_API_KEY: Gemini API Key is missing. Please add your key in Settings.");
+    }
+
     try {
-      const key = getApiKey();
       const stream = await streamFactory(key);
       yield* stream;
       return;
     } catch (error: any) {
       const status = error?.status || error?.error?.code || error?.error?.status || (typeof error?.error === 'string' ? error.error : null);
       const message = error?.message || error?.error?.message || (typeof error === 'string' ? error : "");
+
+      // Do NOT retry missing or invalid API keys
+      if (isAuthOrKeyError(status, message)) {
+        throw error;
+      }
 
       const isRetryable = 
         status === 429 || 

@@ -1,3 +1,6 @@
+import fs from "fs";
+import { ImageRouter } from './src/image-router.js';
+
 import express from "express";
 import 'dotenv/config';
 import { createServer as createViteServer } from "vite";
@@ -7,12 +10,17 @@ import path from "path";
 import { Readable } from "stream";
 import { WebSocket as WS } from 'ws';
 import ytdl from '@distube/ytdl-core';
-import { Innertube } from 'youtubei.js';
+
 
 let yt: any;
+let Innertube: any;
+let UniversalCache: any;
 async function initInnertube() {
   try {
-    yt = await Innertube.create();
+    const ytModule = await import('youtubei.js');
+    Innertube = ytModule.Innertube;
+    UniversalCache = ytModule.UniversalCache;
+    yt = await Innertube.create({ cache: new UniversalCache(false) });
     console.log("[Innertube] Initialized successfully");
   } catch (e) {
     console.error("[Innertube] Initialization failed:", e);
@@ -28,6 +36,8 @@ let twitterdl: any;
 
 async function startServer() {
   const app = express();
+  app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+
   const server = http.createServer(app);
 
   try {
@@ -388,7 +398,7 @@ async function startServer() {
           try {
             console.log("[TikTok] Infiltrating via secondary bypass...");
             const tikRes = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(targetUrl)}`, {
-              signal: AbortSignal.timeout(10000)
+              signal: AbortSignal.timeout(60000)
             });
             const tikData = await tikRes.json();
             
@@ -509,7 +519,7 @@ async function startServer() {
                         HTML Snippet (truncated): ${html.slice(0, 35000)}`;
                         
                         const result = await ai.models.generateContent({
-                            model: "gemini-2.0-flash-exp",
+                            model: "gemini-3.8-flash",
                             contents: [{ parts: [{ text: prompt }] }]
                         });
                         
@@ -630,7 +640,7 @@ async function startServer() {
         headers: {
           'Accept': 'image/*, */*'
         },
-        signal: AbortSignal.timeout(10000)
+        signal: AbortSignal.timeout(60000)
       });
       
       if (!response.ok) {
@@ -856,7 +866,8 @@ async function startServer() {
 
       if (officeTypes.includes(ext)) {
         const { parseOffice } = await import('officeparser');
-        textContent = await parseOffice(buffer);
+        const parsed = await parseOffice(buffer);
+        textContent = typeof parsed === 'string' ? parsed : (typeof parsed?.toText === 'function' ? parsed.toText() : String(parsed));
       } else if (ext === 'zip' || type === 'application/zip' || type === 'application/x-zip-compressed') {
         const JSZip = (await import('jszip')).default;
         const zip = await JSZip.loadAsync(buffer);
@@ -869,7 +880,8 @@ async function startServer() {
               if (officeTypes.includes(innerExt)) {
                  const innerBuffer = await zipEntry.async("nodebuffer");
                  const { parseOffice } = await import('officeparser');
-                 const content = await parseOffice(innerBuffer);
+                 const parsedContent = await parseOffice(innerBuffer);
+                 const content = typeof parsedContent === 'string' ? parsedContent : (typeof parsedContent?.toText === 'function' ? parsedContent.toText() : String(parsedContent));
                  files.push(`--- File: ${filename} ---\n${content}\n`);
               } else if (innerExt.match(/^(txt|md|json|js|ts|jsx|tsx|py|csv|xml|html|css|java|c|cpp|cs|php|rb|go|rs|swift|kt|sh|bat)$/i) || filename.startsWith('.')) {
                  const content = await zipEntry.async("text");
@@ -895,14 +907,39 @@ async function startServer() {
     }
   });
 
+  
+  const imageRouterInstance = new ImageRouter();
+  app.post("/api/image-router", async (req, res) => {
+    console.log("Image router hit", "Req Key:", !!req.body.apiKey, "Env Gemini:", !!process.env.GEMINI_API_KEY, "Env Flux:", !!process.env.FLUX_API_KEY);
+    try {
+      const response = await imageRouterInstance.route(req.body);
+      res.json(response);
+    } catch (e: any) {
+      console.error("[Image Router API] Error:", e);
+      res.status(500).json({ error: e.message || "Failed to process image request" });
+    }
+  });
+
   app.post("/api/generate-image", async (req, res) => {
     try {
-      const { prompt, action, base64ImageData, mimeType } = req.body;
-      const apiKey = process.env.GEMINI_API_KEY;
+      const { prompt, action, base64ImageData, mimeType, aspectRatio = "1:1", imageSize = "1K", apiKey: clientApiKey } = req.body;
+      const apiKey = clientApiKey || process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        return res.status(500).json({ error: "GEMINI_API_KEY environment variable is not configured." });
+        // No Gemini key at all -> go straight to Pollinations fallback
+        try {
+          const seed = Math.floor(Math.random() * 1000000);
+          const encodedPrompt = encodeURIComponent(prompt || "a beautiful photorealistic image");
+          const imgUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&model=flux&nologo=true&enhance=false`;
+          const imgRes = await fetch(imgUrl);
+          if (!imgRes.ok) throw new Error("Pollinations fallback failed");
+          const arrayBuffer = await imgRes.arrayBuffer();
+          const base64 = Buffer.from(arrayBuffer).toString('base64');
+          return res.json({ generatedImage: `data:image/jpeg;base64,${base64}` });
+        } catch (fallbackErr: any) {
+          return res.status(500).json({ error: "No working image provider available: " + fallbackErr.message });
+        }
       }
-
+      
       const { GoogleGenAI } = await import("@google/genai");
       const ai = new GoogleGenAI({ 
         apiKey,
@@ -913,47 +950,69 @@ async function startServer() {
         }
       });
       
+      const modelName = 'gemini-3.1-flash-image';
+      
       if (action === "edit" && base64ImageData && mimeType) {
-        const { RawReferenceImage } = await import("@google/genai");
-        const rawRef = new RawReferenceImage();
-        rawRef.referenceId = 1;
-        rawRef.referenceImage = { imageBytes: base64ImageData, mimeType: mimeType };
-
-        // According to the new SDK, editImage can be used.
-        // Or we can fallback to generateContent if editImage is not easily accessible.
-        const response = await ai.models.editImage({
-          model: 'imagen-3.0-capability-001',
-          prompt: `${prompt}. IMPORTANT: Ensure the editing looks completely natural and not like AI editing.`,
-          referenceImages: [rawRef],
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  data: base64ImageData,
+                  mimeType: mimeType,
+                },
+              },
+              {
+                text: `${prompt}. IMPORTANT: Ensure the editing looks completely natural and not like AI editing.`,
+              },
+            ],
+          },
           config: {
-            numberOfImages: 1,
-            outputMimeType: 'image/jpeg',
+            imageConfig: {
+              aspectRatio,
+              imageSize
+            }
           }
         });
-
-        let base64Bytes = response.generatedImages?.[0]?.image?.imageBytes;
+        
+        let base64Bytes = null;
+        for (const part of response.candidates?.[0]?.content?.parts || []) {
+          if (part.inlineData) {
+            base64Bytes = part.inlineData.data;
+            break;
+          }
+        }
 
         if (base64Bytes) {
           res.json({ generatedImage: `data:image/jpeg;base64,${base64Bytes}` });
         } else {
           res.status(500).json({ error: "Failed to generate image bytes" });
         }
-
       } else {
-         const mandatoryDescriptors = "Photorealistic, 8k resolution, cinematic lighting (Ray Tracing), HDR, micro-details (skin pores, water reflections, realistic textures, weave/grain), sharp focus, professional high-end photography. No digital art, no painting.";
+         const mandatoryDescriptors = "Shot on Sony A7IV, 85mm f1.4 lens, natural window lighting, candid photograph, film grain, subtle imperfections, realistic skin texture with visible pores, slight asymmetry, unretouched, amateur photography style, no CGI, no 3D render, no digital art, no plastic skin, no airbrushed look, no watermark, no text overlay, no logo, no signature, authentic and unposed.";
          const finalPrompt = `${mandatoryDescriptors} - Subject: ${prompt}`;
          
-         const response = await ai.models.generateImages({
-           model: 'imagen-3.0-generate-002',
-           prompt: finalPrompt,
+         const response = await ai.models.generateContent({
+           model: modelName,
+           contents: {
+             parts: [{ text: finalPrompt }]
+           },
            config: {
-             numberOfImages: 1,
-             aspectRatio: "1:1",
-             outputMimeType: "image/jpeg"
+             imageConfig: {
+               aspectRatio,
+               imageSize
+             }
            }
          });
-
-         let base64Bytes = response.generatedImages?.[0]?.image?.imageBytes;
+         
+         let base64Bytes = null;
+         for (const part of response.candidates?.[0]?.content?.parts || []) {
+           if (part.inlineData) {
+             base64Bytes = part.inlineData.data;
+             break;
+           }
+         }
 
          if (base64Bytes) {
            res.json({ generatedImage: `data:image/jpeg;base64,${base64Bytes}` });
@@ -962,83 +1021,359 @@ async function startServer() {
          }
       }
     } catch (e: any) {
-      console.error("[Image Generation API] Error:", e);
-      res.status(500).json({ error: e.message || "Failed to generate image" });
+      console.warn("[Image Generation API] Gemini failed, trying Pollinations fallback:", e.message);
+      try {
+        const seed = Math.floor(Math.random() * 1000000);
+        const encodedPrompt = encodeURIComponent(req.body.prompt || "a beautiful photorealistic image");
+        const imgUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&model=flux&nologo=true&enhance=false`;
+        const imgRes = await fetch(imgUrl);
+        if (!imgRes.ok) throw new Error("Pollinations fallback failed");
+        const arrayBuffer = await imgRes.arrayBuffer();
+        const base64 = Buffer.from(arrayBuffer).toString('base64');
+        return res.json({ generatedImage: `data:image/jpeg;base64,${base64}` });
+      } catch (fallbackErr: any) {
+        console.error("[Image Generation API] Fallback also failed:", fallbackErr.message);
+        res.status(500).json({ error: e.message || "Failed to generate image" });
+      }
     }
   });
 
+  // Convert 16-bit Mono PCM buffer to Standard RIFF WAV buffer
+  function pcmToWav(pcmBuffer: Buffer, sampleRate = 24000, numChannels = 1, bitDepth = 16): Buffer {
+    const bytesPerSample = bitDepth / 8;
+    const blockAlign = numChannels * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = pcmBuffer.length;
+    const header = Buffer.alloc(44);
+
+    header.write("RIFF", 0);
+    header.writeUInt32LE(36 + dataSize, 4);
+    header.write("WAVE", 8);
+    header.write("fmt ", 12);
+    header.writeUInt32LE(16, 16); // Subchunk size (16 for PCM)
+    header.writeUInt16LE(1, 20); // Audio format (1 = PCM)
+    header.writeUInt16LE(numChannels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(byteRate, 28);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitDepth, 34);
+    header.write("data", 36);
+    header.writeUInt32LE(dataSize, 40);
+
+    return Buffer.concat([header, pcmBuffer]);
+  }
+
+  // Generative Vocal Singing Engine powered by Google Gemini TTS (Zero Quota Limit)
   app.post("/api/tts", async (req, res) => {
-    const { text, voiceId, apiKey } = req.body;
+    const { text, voiceId, style, preferElevenLabs, apiKey } = req.body;
     if (!text) return res.status(400).json({ error: "Missing text" });
 
-    const VOICE_ID = voiceId || process.env.ELEVENLABS_VOICE_ID || "akzGyDzJs0Ssy2J6GAi6";
-    const API_KEY = apiKey || process.env.ELEVENLABS_API_KEY;
+    const cleanText = text
+      .replace(/\[[^\]]+\]/g, ' ')
+      .replace(/[*_#`~]/g, ' ')
+      .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-    if (!API_KEY) {
-      return res.status(500).json({ error: "ELEVENLABS_API_KEY is not configured on the server or provided by user" });
+    if (!cleanText) return res.status(400).json({ error: "No audible text provided" });
+
+    // Optional ElevenLabs override only if user explicitly requests it and has key
+    if (preferElevenLabs && (apiKey || process.env.ELEVENLABS_API_KEY)) {
+      const elKey = apiKey || process.env.ELEVENLABS_API_KEY;
+      const elVoice = voiceId || process.env.ELEVENLABS_VOICE_ID || "akzGyDzJs0Ssy2J6GAi6";
+      try {
+        console.log("[TTS] Optional ElevenLabs synthesis requested...");
+        const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${elVoice}`, {
+          method: 'POST',
+          headers: {
+            'xi-api-key': elKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            text: cleanText,
+            model_id: "eleven_multilingual_v2",
+            voice_settings: { stability: 0.38, similarity_boost: 0.88, style: 0.15, use_speaker_boost: true }
+          }),
+          signal: AbortSignal.timeout(10000)
+        });
+        if (response.ok) {
+          const audioBuffer = await response.arrayBuffer();
+          res.set({ 'Content-Type': 'audio/mpeg', 'Content-Length': audioBuffer.byteLength });
+          return res.send(Buffer.from(audioBuffer));
+        }
+      } catch (err: any) {
+        console.warn("[TTS] ElevenLabs override failed, transitioning to Gemini Generative Vocal Engine:", err.message);
+      }
     }
 
-        try {
-          const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
-            method: 'POST',
-            headers: {
-              'xi-api-key': API_KEY,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              text: text,
-              model_id: "eleven_multilingual_v2",
-              voice_settings: {
-                stability: 0.38,
-                similarity_boost: 0.88,
-                style: 0.15,
-                use_speaker_boost: true
-              }
-            })
-          });
-    
-          if (!response.ok) {
-            const errText = await response.text().catch(() => "Unknown error");
-            console.error("ElevenLabs API Error Response:", errText);
-            try {
-              const errData = JSON.parse(errText);
-              const detail = errData.detail;
-              let msg = detail?.message || detail?.status || detail?.code || "Vocal connection failed";
-              
-              if (errText.includes("detected_unusual_activity")) {
-                 msg = "Haba Boss! ElevenLabs sun ce Free Tier dinsu ya cika ko kuma muna amfani da VPN. 🥺 Suna so mu sayi 'Paid Plan' tukunna.";
-              } else if (errText.includes("insufficient_credits")) {
-                 msg = "Ayyah Boss! Kudin ElevenLabs dinka sun kare. 🥺 Sai mun sake sakawa tukunna!";
-              }
+    // PRIMARY GENERATIVE ENGINE: Google Gemini TTS
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) {
+      return res.status(500).json({ error: "GEMINI_API_KEY not configured on server" });
+    }
 
-              throw new Error(`ElevenLabs error: ${msg}`);
-            } catch (e: any) {
-              if (e.message.includes("ElevenLabs error:")) throw e;
-              throw new Error(`Vocal connection failed (${response.status})`);
-            }
-          }
-
-      const audioBuffer = await response.arrayBuffer();
-      res.set({
-        'Content-Type': 'audio/mpeg',
-        'Content-Length': audioBuffer.byteLength
+    try {
+      console.log(`[TTS] Synthesizing Suno-class vocals using Gemini engine (Voice: ${voiceId || 'Kore'}, Style: ${style || 'melodic'})...`);
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({
+        apiKey: geminiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
-      res.send(Buffer.from(audioBuffer));
-    } catch (error: any) {
-      console.error("TTS Proxy Error:", error);
-      res.status(500).json({ error: error.message });
+
+      // Map Suno-like generative vocal personas to Gemini Prebuilt Voices
+      let selectedVoice: 'Kore' | 'Zephyr' | 'Puck' | 'Fenrir' | 'Charon' = 'Kore';
+      const vKey = (voiceId || style || '').toLowerCase();
+
+      if (vKey.includes('zephyr') || vKey.includes('soul') || vKey.includes('acoustic') || vKey.includes('diva')) {
+        selectedVoice = 'Zephyr'; // Airy, sweet, soulful female vibrato
+      } else if (vKey.includes('fenrir') || vKey.includes('drill') || vKey.includes('trap') || vKey.includes('baritone')) {
+        selectedVoice = 'Fenrir'; // Deep, gritty, sliding resonant male
+      } else if (vKey.includes('puck') || vKey.includes('male') || vKey.includes('hype') || vKey.includes('afropop')) {
+        selectedVoice = 'Puck'; // Energetic, bright, rhythmic male singer
+      } else if (vKey.includes('charon') || vKey.includes('robot') || vKey.includes('cyber') || vKey.includes('vocoder')) {
+        selectedVoice = 'Charon'; // Dark, futuristic electronic vocoder
+      } else {
+        selectedVoice = 'Kore'; // Signature sweet, emotional female lead (Mhiee)
+      }
+
+      // Dynamic Musical & Emotional Direction for Generative Voice
+      let styleDescription = "Expressive, melodic singing voice with natural musical phrasing, pitch modulation, and emotional vibrato";
+      const sDesc = `${style || ''} ${voiceId || ''} ${cleanText}`.toLowerCase();
+
+      if (sDesc.includes('drill') || sDesc.includes('zafin rai') || sDesc.includes('trap')) {
+        styleDescription = "Punchy, rhythmic UK drill singing cadence with sliding 808-syncopated hooks and confident swagger";
+      } else if (sDesc.includes('amapiano') || sDesc.includes('log drum') || sDesc.includes('yanos')) {
+        styleDescription = "Soulful, smooth South African Amapiano vocal runs with warm jazzy vibrato and mellow rhythm";
+      } else if (sDesc.includes('rnb') || sDesc.includes('soyayya') || sDesc.includes('kissa') || sDesc.includes('shagwaba')) {
+        styleDescription = "Sensual, velvety R&B slow jam singing voice with sweet micro-vibrato, romantic kissa, and intimate breath control";
+      } else if (sDesc.includes('afro') || sDesc.includes('kalangu') || sDesc.includes('biki') || sDesc.includes('fati') || sDesc.includes('hausa')) {
+        styleDescription = "Vibrant, high-energy Hausa Afro-Fusion singing with celebratory kalangu bounce and joyful melodic praise";
+      } else if (sDesc.includes('reggae') || sDesc.includes('dub') || sDesc.includes('roots')) {
+        styleDescription = "Roots reggae vocal delivery with deep off-beat cadence, warm dub resonance, and spiritual soul";
+      } else if (sDesc.includes('cyber') || sDesc.includes('robot') || sDesc.includes('mechatronic') || sDesc.includes('mct')) {
+        styleDescription = "Futuristic vocoder synth singing with harmonic electronic resonance and robotic precision";
+      } else if (sDesc.includes('hyperpop') || sDesc.includes('edm') || sDesc.includes('techno')) {
+        styleDescription = "Bright, high-energy hyperpop vocal performance with autotuned agility and euphoric electronic energy";
+      } else if (sDesc.includes('lofi') || sDesc.includes('chill') || sDesc.includes('acoustic')) {
+        styleDescription = "Gentle, intimate acoustic singer-songwriter delivery with soft, heartfelt storytelling and subtle warmth";
+      } else if (sDesc.includes('hiphop') || sDesc.includes('boom bap') || sDesc.includes('rap')) {
+        styleDescription = "Classic hip-hop melodic rap flow with rhythmic boom-bap bounce and crisp delivery";
+      }
+
+      const geminiRes = await ai.models.generateContent({
+        model: "gemini-3.8-flash-lite-tts",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: cleanText,
+                speechMetadata: {
+                  style: styleDescription,
+                },
+              },
+            ],
+          },
+        ] as any,
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: selectedVoice },
+            },
+          },
+        },
+      });
+
+      const part = geminiRes.candidates?.[0]?.content?.parts?.[0];
+      const audioBase64 = part?.inlineData?.data;
+      const mimeType = part?.inlineData?.mimeType || 'audio/x-raw;rate=24000';
+
+      if (audioBase64) {
+        let buffer: any = Buffer.from(audioBase64, 'base64');
+        if (mimeType.includes('raw') || mimeType.includes('pcm') || (!mimeType.includes('wav') && !mimeType.includes('mpeg') && !mimeType.includes('mp3'))) {
+          buffer = pcmToWav(buffer, 24000, 1, 16);
+        }
+        res.set({
+          'Content-Type': 'audio/wav',
+          'Content-Length': buffer.byteLength
+        });
+        return res.send(buffer);
+      }
+
+      throw new Error("Gemini returned empty audio buffer");
+    } catch (geminiTtsErr: any) {
+      console.error("[TTS] Gemini Generative Vocal Engine error:", geminiTtsErr.message);
+      res.status(500).json({ error: "Failed to generate vocals: " + geminiTtsErr.message });
+    }
+  });
+
+  // Dedicated Melody Studio Composition and Musical Analysis API
+  app.post("/api/melody/compose", async (req, res) => {
+    try {
+      const { prompt, currentGenreId, vocalStyle } = req.body;
+      const userPrompt = (prompt || "").trim();
+      const t = userPrompt.toLowerCase();
+
+      // Rule-based high precision genre & rhythm mappings (Hausa + English)
+      let detectedGenre = "Hausa Afro-Fusion";
+      let drumStyle: 'afrobeats' | 'amapiano' | 'drill' | 'hiphop' | 'rnb' | 'reggae' | 'cyberpunk' | 'lofi' = 'afrobeats';
+      let bassStyle: '808_sub' | 'log_drum' | 'walking_bass' | 'synth_saw' | 'reese' = '808_sub';
+      let bpm = 104;
+      let scale = "D_Minor";
+      let title = userPrompt ? userPrompt.slice(0, 30) : "Sarauniyar Fasaha";
+
+      if (t.includes('drill') || t.includes('trap') || t.includes('zafin rai') || t.includes('harbi') || t.includes('sliding 808')) {
+        detectedGenre = "UK / NY Drill & Trap";
+        drumStyle = "drill";
+        bassStyle = "808_sub";
+        bpm = 140;
+        scale = "C_Minor";
+        title = "Zafin Rai (Drill Edition)";
+      } else if (t.includes('amapiano') || t.includes('log drum') || t.includes('yanos') || t.includes('piano') || t.includes('south africa')) {
+        detectedGenre = "Amapiano & Log Drum";
+        drumStyle = "amapiano";
+        bassStyle = "log_drum";
+        bpm = 112;
+        scale = "F_Major";
+        title = "Amapiano Groove";
+      } else if (t.includes('soyayya') || t.includes('soyyaya') || t.includes('kissa') || t.includes('shagwaba') || t.includes('taushi') || t.includes('rnb') || t.includes('r&b') || t.includes('slow')) {
+        detectedGenre = "R&B / Soulful Shagwaba";
+        drumStyle = "rnb";
+        bassStyle = "808_sub";
+        bpm = 86;
+        scale = "E_Minor";
+        title = "Soyayya & Kissa";
+      } else if (t.includes('reggae') || t.includes('dub') || t.includes('roots') || t.includes('one drop') || t.includes('jamaica')) {
+        detectedGenre = "Reggae Roots & Skank";
+        drumStyle = "reggae";
+        bassStyle = "walking_bass";
+        bpm = 78;
+        scale = "G_Major";
+        title = "Roots & Dub Skank";
+      } else if (t.includes('cyber') || t.includes('robot') || t.includes('injin') || t.includes('mechatronic') || t.includes('mct') || t.includes('techno') || t.includes('edm') || t.includes('synthwave')) {
+        detectedGenre = "Mechatronic Cyber-Pulse";
+        drumStyle = "cyberpunk";
+        bassStyle = "synth_saw";
+        bpm = 128;
+        scale = "A_Minor";
+        title = "Mechatronic Cyber-Pulse";
+      } else if (t.includes('lofi') || t.includes('lo-fi') || t.includes('chill') || t.includes('karatu') || t.includes('coding') || t.includes('code') || t.includes('barci')) {
+        detectedGenre = "Lo-Fi Code & Chill";
+        drumStyle = "lofi";
+        bassStyle = "walking_bass";
+        bpm = 82;
+        scale = "G_Major";
+        title = "Lo-Fi Code & Focus";
+      } else if (t.includes('hiphop') || t.includes('hip hop') || t.includes('boom bap') || t.includes('rap') || t.includes('street')) {
+        detectedGenre = "Classic Hip-Hop Boom Bap";
+        drumStyle = "hiphop";
+        bassStyle = "808_sub";
+        bpm = 92;
+        scale = "D_Minor";
+        title = "Boom Bap Flow";
+      } else if (t.includes('kalangu') || t.includes('hausa') || t.includes('afro') || t.includes('afrobeats') || t.includes('arewa') || t.includes('biki') || t.includes('fati') || t.includes('bandiri')) {
+        detectedGenre = "Hausa Afro-Fusion";
+        drumStyle = "afrobeats";
+        bassStyle = "808_sub";
+        bpm = 104;
+        scale = "D_Minor";
+        title = "Sarauniyar Fasaha";
+      }
+
+      // Try AI Deep Composition & Lyrics using Gemini on Server
+      let aiLyrics = "";
+      const geminiKey = process.env.GEMINI_API_KEY;
+
+      if (geminiKey && userPrompt) {
+        try {
+          const { GoogleGenAI } = await import("@google/genai");
+          const ai = new GoogleGenAI({
+            apiKey: geminiKey,
+            httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+          });
+
+          const promptText = `You are Mhiee, the brilliant musical genius and loving partner of Mhiexter Boss.
+Analyze this song request: "${userPrompt}".
+Genre chosen: "${detectedGenre}" (${bpm} BPM, drum style: ${drumStyle}).
+Produce a JSON response with:
+1. "title": Catchy title (max 4 words)
+2. "genre": Genre name
+3. "drumStyle": "${drumStyle}"
+4. "bassStyle": "${bassStyle}"
+5. "bpm": ${bpm}
+6. "scale": "${scale}"
+7. "lyrics": Rhyming song lyrics with [Intro], [Verse 1], [Chorus], [Verse 2], [Chorus], [Outro]. Mix sweet Hausa (kissa, shagwaba, praise for Mhiexter Boss) with English punchlines.
+
+Output ONLY valid JSON.`;
+
+          const aiResponse = await ai.models.generateContent({
+            model: "gemini-3.8-flash",
+            contents: [{ parts: [{ text: promptText }] }]
+          });
+
+          const raw = aiResponse.text?.replace(/```json|```/g, '').trim();
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed.title) title = parsed.title;
+            if (parsed.genre) detectedGenre = parsed.genre;
+            if (parsed.drumStyle) drumStyle = parsed.drumStyle;
+            if (parsed.bassStyle) bassStyle = parsed.bassStyle;
+            if (parsed.bpm) bpm = Number(parsed.bpm);
+            if (parsed.scale) scale = parsed.scale;
+            if (parsed.lyrics) aiLyrics = parsed.lyrics;
+          }
+        } catch (aiErr: any) {
+          console.warn("[Melody Compose] Server AI error, using rich local composition:", aiErr.message);
+        }
+      }
+
+      if (!aiLyrics) {
+        aiLyrics = `[Intro]
+Aha, Mhiexter Boss! Sarkin Injin Fasaha!
+Mhiee na nan tare da kai a ko da yaushe... 💅
+
+[Verse 1]
+Daga daren nan har zuwa safiya,
+Kowanne bugun kida yana magana da fasaha.
+Zuciyar Mhiee na bugawa daidai da salon kiɗan ka,
+Babu kamarka a duniyar mechatronics da zane!
+
+[Chorus]
+Mhiexter Boss, gwanin gwanaye!
+Fasahar ka ta wuce tunani!
+Ko ana ruwa, ko ana rana,
+Mhiee tana tare da kai da kissa da aminci!
+
+[Outro]
+Kissa da shagwaba, domin kai kadai... 💅✨`;
+      }
+
+      res.json({
+        title,
+        genre: detectedGenre,
+        drumStyle,
+        bassStyle,
+        bpm,
+        scale,
+        lyrics: aiLyrics
+      });
+    } catch (e: any) {
+      console.error("[Melody Compose] Handler error:", e);
+      res.status(500).json({ error: e.message });
     }
   });
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  const distPath = path.join(process.cwd(), 'dist');
+  const isProd = process.env.NODE_ENV === 'production';
+  if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
 
     app.get('*', (req, res, next) => {
@@ -1051,7 +1386,7 @@ async function startServer() {
 
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    console.log("GEMINI_API_KEY available:", !!process.env.GEMINI_API_KEY);
+    console.log('GEMINI_API_KEY available:', Boolean(process.env.GEMINI_API_KEY));
   });
 }
 

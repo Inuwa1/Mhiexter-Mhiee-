@@ -30,7 +30,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         try {
           // Fetch user profile from Cloud Firestore
-          let profile = await fetchUserProfile(firebaseUser.uid);
+          let profile = null;
+          try {
+             profile = await fetchUserProfile(firebaseUser.uid);
+          } catch (err) {
+             console.warn("Could not fetch profile, client might be offline:", err);
+          }
           
           if (!profile) {
             // Setup default database record for first-time login
@@ -42,20 +47,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               preferredWakeWord: localStorage.getItem('preferredWakeWord') || 'Mhiee',
             };
             
-            profile = await createUserProfile(
-              firebaseUser.uid,
-              firebaseUser.displayName || 'Mhiexter Boss',
-              firebaseUser.email || '',
-              firebaseUser.photoURL || '',
-              defaultPrefs
-            );
+            try {
+              profile = await createUserProfile(
+                firebaseUser.uid,
+                firebaseUser.displayName || 'Mhiexter Boss',
+                firebaseUser.email || '',
+                firebaseUser.photoURL || '',
+                defaultPrefs
+              );
+            } catch(err) {
+              console.warn("Could not save profile to firestore, setting local only:", err);
+              profile = {
+                uid: firebaseUser.uid,
+                displayName: firebaseUser.displayName || 'Mhiexter Boss',
+                email: firebaseUser.email || '',
+                photoURL: firebaseUser.photoURL || '',
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                preferences: defaultPrefs
+              };
+            }
           }
           
           setUserProfile(profile);
           
           // Bidirectional Cloud Synchronization of state registers
-          await syncCloudData(firebaseUser.uid);
-          await syncChatHistory(firebaseUser.uid);
+          try {
+             await syncCloudData(firebaseUser.uid);
+             await syncChatHistory(firebaseUser.uid);
+          } catch (syncErr) {
+             console.warn("Sync failed, offline?", syncErr);
+          }
           
           console.log(`Uhm,, Sannu da zuwa Boss! Firebase session successfully matched for UID: ${firebaseUser.uid} ✨`);
         } catch (err) {

@@ -2,7 +2,7 @@ import { doc, getDocs, setDoc, collection, deleteDoc, updateDoc } from 'firebase
 import { db } from '../firebase';
 import { TaskPlan, TaskNode } from '../types';
 import { GoogleGenAI } from '@google/genai';
-import { handleFirestoreError, OperationType } from './firestoreErrorHandler';
+import { handleFirestoreError, OperationType } from './firestoreStatus';
 
 export async function fetchTaskPlans(uid: string): Promise<TaskPlan[]> {
   const path = `users/${uid}/taskPlans`;
@@ -86,7 +86,7 @@ Array<{
   let tasks: TaskNode[] = [];
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       contents: prompt,
     });
     
